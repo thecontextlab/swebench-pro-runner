@@ -1,0 +1,99 @@
+# SWE-bench Pro Configuration for qutebrowser with Task Groups
+# This file configures how tasks are executed in this repository
+
+repository: qutebrowser/qutebrowser
+language: python
+
+# Default image - Python 3.11 for most modern tasks
+image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed qutebrowser codebase"
+
+# Task group configurations based on SWE-bench_Pro-os investigation
+task_groups:
+  # Tasks requiring Python 3.9 (verified from SWE-bench_Pro-os dockerfiles)
+  python39_legacy:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-v2ef375ac784985212b1805e1d0431dc8f1b3c171$"
+    description: "Legacy tasks requiring Python 3.9 (python:3.9-slim based, PyQt5)"
+    python_version: "3.9"
+
+  # Tasks requiring Python 3.11 with PyQt5 (v059c6fdc variant)
+  python311_pyqt5_059:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-v059c6fdc75567943479b23ebca7c07b5e9a7f34c$"
+    description: "Python 3.11 tasks with PyQt5 (v059c6fdc variant)"
+    python_version: "3.11"
+
+  # Tasks requiring Python 3.11 with PyQt5 (v363c8a7e variant - pinned deps)
+  python311_pyqt5_363:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-v363c8a7e5ccdf6968fc7ab84a2053ac78036691d$"
+    description: "Python 3.11 tasks with PyQt5 pinned deps (v363c8a7e variant)"
+    python_version: "3.11"
+
+  # Tasks requiring Python 3.11 with PyQt5 (vc2f56a75 variant)
+  python311_pyqt5_c2f:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-vc2f56a753b62a190ddb23cd330c257b9cf560d12$"
+    description: "Python 3.11 tasks with PyQt5 (vc2f56a75 variant)"
+    python_version: "3.11"
+
+  # Tasks requiring Python 3.11 with PyQt6 (v9f8e9d96 variant)
+  python311_pyqt6_9f8:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-v9f8e9d96c85c85a605e382f1510bd08563afc566$"
+    description: "Python 3.11 tasks with PyQt6 (v9f8e9d96 variant)"
+    python_version: "3.11"
+
+  # Tasks requiring Python 3.11 with PyQt6 (va0fd88aa variant)
+  python311_pyqt6_a0f:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-va0fd88aac89cde702ec1ba84877234da33adce8a$"
+    description: "Python 3.11 tasks with PyQt6 (va0fd88aa variant)"
+    python_version: "3.11"
+
+  # Tasks requiring Python 3.11 with PyQt6 (v02ad0438 variant)
+  python311_pyqt6_02a:
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    pattern: "qutebrowser__qutebrowser-.*-v02ad04386d5238fe2d1a1be450df257370de4b6a$"
+    description: "Python 3.11 tasks with PyQt6 (v02ad0438 variant, originally Ubuntu)"
+    python_version: "3.11"
+
+# Task-specific overrides for tasks without version hash
+task_overrides:
+  "qutebrowser__qutebrowser-f8e7fea0becae25ae20606f1422068137189fe9e":
+    image: ghcr.io/thecontextlab/swebench-pro-qutebrowser-python311:multi-agent
+    description: "PyQt6 task without version hash suffix"
+    python_version: "3.11"
+
+tasks:
+  count: 79
+  source: 
+  pattern: qutebrowser__qutebrowser-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "Keyboard-driven, vim-like browser based on Python and Qt"
+  lines_of_code: 60000
+  architecture: monolith
+  complexity: medium
+  github_stars: 11000
+  first_commit: "2013-12"
+  key_challenges:
+    - Qt/QtWebEngine integration
+    - Vim-style keybinding system
+    - Configuration system
+    - Tab and session management
+    - Userscript support
+    - Python version compatibility (3.9 vs 3.11)

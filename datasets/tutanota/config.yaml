@@ -1,0 +1,36 @@
+# SWE-bench Pro Configuration for tutanota
+# This file configures how tasks are executed in this repository
+# Image includes pre-cloned repo with TypeScript tests compiled to JS
+
+repository: tutao/tutanota
+language: typescript
+image: ghcr.io/thecontextlab/swebench-pro-tutanota:multi-agent
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed tutanota codebase"
+
+tasks:
+  count: 20
+  source: 
+  pattern: tutao__tutanota-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "End-to-end encrypted email service"
+  lines_of_code: 100000
+  architecture: monolith
+  complexity: high
+  github_stars: 6000
+  key_challenges:
+    - Client-side cryptography
+    - Offline storage and sync
+    - Custom mail protocol integration
+    - Cross-platform support (web, desktop, mobile)

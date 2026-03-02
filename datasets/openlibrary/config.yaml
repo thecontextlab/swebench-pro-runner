@@ -1,0 +1,107 @@
+# SWE-bench Pro Configuration for openlibrary with Task Groups
+# This file configures how tasks are executed in this repository
+
+repository: internetarchive/openlibrary
+language: python
+
+# Default image for repository (fallback) - Python 3.11 for most tasks
+# Using FIXED image with all dependencies corrected
+image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed openlibrary codebase"
+
+# Task group configurations based on SWE-bench_Pro-os investigation
+task_groups:
+  # Tasks requiring Python 3.9 (6 tasks, pymarc==4.0.0 compatibility)
+  python39_legacy:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python39:fixed
+    pattern: ".*-vfa6ff903cb27f336e17654595dd900fa943dcd91$"
+    description: "Legacy tasks requiring Python 3.9 (python:3.9-slim-bookworm based)"
+    python_version: "3.9"
+    timemachine_date: "2021-02-01"
+
+  # Tasks requiring Python 3.12 (18 tasks, most modern)
+  python312_latest:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python312:fixed
+    pattern: ".*-v0f5aece3601a5b4419f7ccec1dbda2071be28ee4$"
+    description: "Latest tasks requiring Python 3.12 (python:3.12.2-slim based)"
+    python_version: "3.12"
+    timemachine_date: "2024-10-17"
+
+  # Tasks requiring Python 3.11 (12 tasks)
+  python311_modern:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+    pattern: ".*-ve8c8d62a2b60610a3c4631f5f23ed866bada9818$"
+    description: "Modern tasks requiring Python 3.11 (python:3.11-slim based)"
+    python_version: "3.11"
+    timemachine_date: "2023-10-12"
+
+  # Additional Python 3.12 group (14 tasks with different version)
+  python312_stable:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python312:fixed
+    pattern: ".*-v13642507b4fc1f8d234172bf8129942da2c2ca26$"
+    description: "Stable Python 3.12 tasks"
+    python_version: "3.12"
+    timemachine_date: "2023-10-12"
+
+  # Additional Python 3.11 group (11 tasks)
+  python311_base:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+    pattern: ".*-v08d8e8889ec945ab821fb156c04c7d2e2810debb$"
+    description: "Base Python 3.11 tasks"
+    python_version: "3.11"
+    timemachine_date: "2025-08-26"
+
+  # Additional Python 3.11 group (9 tasks)
+  python311_extended:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+    pattern: ".*-v76304ecdb3a5954fcf13feb710e8c40fcf24b73c$"
+    description: "Extended Python 3.11 tasks"
+    python_version: "3.11"
+    timemachine_date: "2022-10-06"
+
+  # Python 3.11 group for d9 pattern (4 tasks)
+  python311_d9:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+    pattern: ".*-v2d9a6c849c60ed19fd0858ce9e40b7cc8e097e59$"
+    description: "Python 3.11 d9 pattern tasks"
+    python_version: "3.11"
+    timemachine_date: "2025-08-26"
+
+  # Python 3.11 group for 87 pattern (3 tasks)
+  python311_87:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+    pattern: ".*-v8717e18970bcdc4e0d2cea3b1527752b21e74866$"
+    description: "Python 3.11 87 pattern tasks"
+    python_version: "3.11"
+    timemachine_date: "2025-04-01"
+
+tasks:
+  count: 91
+  source: 
+  pattern: internetarchive__openlibrary-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "One webpage for every book ever published"
+  lines_of_code: 100000
+  architecture: monolith
+  complexity: high
+  github_stars: 5000
+  key_challenges:
+    - Legacy Infogami wiki framework
+    - Complex data import pipelines
+    - Integration with Internet Archive
+    - Book lending and borrowing logic
+    - Search and catalog management
+    - Python version compatibility (3.9, 3.11, 3.12)

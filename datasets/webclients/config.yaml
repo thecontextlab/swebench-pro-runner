@@ -1,0 +1,38 @@
+# SWE-bench Pro Configuration for webclients
+# This file configures how tasks are executed in this repository
+
+repository: protonmail/webclients
+language: typescript
+image: ghcr.io/thecontextlab/swebench-pro-webclients:node22-cli
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+agent:
+  type: claude-code
+  default_model: claude-3-5-haiku-20241022
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed webclients codebase"
+  # Token stored in GitHub Secrets: MCP_TOKEN_WEBCLIENTS
+  token_secret_name: "MCP_TOKEN_WEBCLIENTS"
+
+tasks:
+  count: 65
+  source: 
+  pattern: protonmail__webclients-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "ProtonMail web applications suite (Mail, Calendar, Drive)"
+  lines_of_code: 500000
+  architecture: monorepo
+  complexity: very_high
+  github_stars: 4000
+  key_challenges:
+    - Cryptographic operations in browser
+    - Complex state management across apps
+    - Shared component library architecture
+    - End-to-end encryption protocols
+    - Offline-first capabilities

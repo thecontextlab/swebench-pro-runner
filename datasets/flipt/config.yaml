@@ -1,0 +1,37 @@
+# SWE-bench Pro Configuration for flipt
+# This file configures how tasks are executed in this repository
+
+repository: flipt-io/flipt
+language: go
+# Updated to use prebaked image with repository and dependencies
+image: ghcr.io/thecontextlab/swebench-pro-flipt:cli
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed flipt codebase"
+
+tasks:
+  count: 85
+  source: 
+  pattern: flipt-io__flipt-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "Open-source feature flag infrastructure"
+  lines_of_code: 50000
+  architecture: microservice
+  complexity: medium
+  github_stars: 3000
+  key_challenges:
+    - gRPC and REST API design
+    - Rule evaluation engine
+    - Multiple storage backends
+    - Real-time flag updates
+    - SDK compatibility

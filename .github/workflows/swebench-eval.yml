@@ -1,0 +1,603 @@
+name: SWE-bench Evaluation
+
+run-name: "${{ inputs.repo }} | ${{ inputs.task }} | ${{ inputs.agent }} | MCP:${{ inputs.enable_mcp }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repository (e.g., vuls, flipt, teleport)'
+        required: true
+        type: choice
+        options:
+          - vuls
+          - flipt
+          - teleport
+          - navidrome
+          - ansible
+          - element-web
+          - NodeBB
+          - openlibrary
+          - qutebrowser
+          - tutanota
+          - webclients
+      task:
+        description: 'Task ID (e.g., future-architect__vuls-01441351c3407abfc21c48a38e28828e1b504e0c)'
+        required: true
+        type: string
+      agent:
+        description: 'AI agent to use'
+        required: false
+        default: 'claude'
+        type: choice
+        options:
+          - claude
+          - codex
+          - gemini
+      model:
+        description: 'Model to use (agent-specific)'
+        required: false
+        default: 'claude-sonnet-4-5-20250929'
+        type: choice
+        options:
+          # Claude models
+          - claude-sonnet-4-5-20250929
+          - claude-sonnet-4-20250514
+          - claude-opus-4-5-20251101
+          - claude-opus-4-6
+          - claude-haiku-4-5-20251001
+          - claude-3-5-haiku-20241022
+          # OpenAI/Codex models
+          - gpt-5.3-codex
+          - gpt-5.2-codex
+          - gpt-4-turbo-preview
+          - gpt-4o
+          - gpt-4o-mini
+          - o1-preview
+          - o1-mini
+          # Gemini models
+          - gemini-3-pro-preview
+          - gemini-1.5-pro
+          - gemini-1.5-flash
+          - gemini-2.0-flash-exp
+      enable_mcp:
+        description: 'Enable MCP server for A/B testing'
+        required: false
+        default: false
+        type: boolean
+      anthropic_api_key:
+        description: 'Anthropic API key (optional, falls back to ANTHROPIC_API_KEY secret)'
+        required: false
+        type: string
+      openai_api_key:
+        description: 'OpenAI API key (optional, falls back to OPENAI_API_KEY secret)'
+        required: false
+        type: string
+      gemini_api_key:
+        description: 'Gemini API key (optional, falls back to GEMINI_API_KEY secret)'
+        required: false
+        type: string
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout eval-runner
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Load task configuration
+        id: task
+        run: |
+          TASK_FILE="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.yaml"
+          if [ ! -f "$TASK_FILE" ]; then
+            echo "ERROR: Task file not found: $TASK_FILE"
+            echo "Available tasks:"
+            ls datasets/${{ inputs.repo }}/tasks/ | head -10
+            exit 1
+          fi
+
+          echo "task_file=$TASK_FILE" >> $GITHUB_OUTPUT
+
+          # Extract fields
+          DIFFICULTY=$(yq '.difficulty' "$TASK_FILE")
+          REPO_URL=$(yq '.repo_url' "$TASK_FILE")
+
+          echo "difficulty=$DIFFICULTY" >> $GITHUB_OUTPUT
+          echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+
+          # Extract before_repo_set_cmd (multiline)
+          yq '.swebench.before_repo_set_cmd' "$TASK_FILE" > /tmp/before_repo_set_cmd.txt
+
+          # Extract instruction/problem_statement (multiline)
+          yq '.instruction' "$TASK_FILE" > /tmp/instruction.txt
+
+          # Extract fail_to_pass tests (one per line, for run_script.sh)
+          yq '.swebench.fail_to_pass[]' "$TASK_FILE" > /tmp/fail_to_pass.txt
+
+          # Extract pass_to_pass tests using Python (preserves \n in test names)
+          python3 -c "
+          import yaml
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          p2p = data.get('swebench', {}).get('pass_to_pass', []) or []
+          with open('/tmp/pass_to_pass.txt', 'w') as out:
+              for t in p2p:
+                  out.write(str(t) + '\n')
+          print(f'pass_to_pass: {len(p2p)} tests')
+          "
+          P2P_COUNT=$(wc -l < /tmp/pass_to_pass.txt | tr -d ' ')
+          echo "p2p_count=$P2P_COUNT" >> $GITHUB_OUTPUT
+
+          # Check for task-specific setup script
+          SETUP_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.setup.sh"
+          if [ -f "$SETUP_SCRIPT" ]; then
+            echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
+            echo "Found setup script: $SETUP_SCRIPT"
+          else
+            echo "setup_script=" >> $GITHUB_OUTPUT
+            echo "WARNING: No setup script found at $SETUP_SCRIPT"
+          fi
+
+          # Check for task-specific run_script.sh
+          RUN_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.run_script.sh"
+          if [ -f "$RUN_SCRIPT" ]; then
+            echo "run_script=$RUN_SCRIPT" >> $GITHUB_OUTPUT
+            echo "Found run_script: $RUN_SCRIPT"
+          else
+            echo "ERROR: No run_script.sh found at $RUN_SCRIPT"
+            exit 1
+          fi
+
+          echo "Task: ${{ inputs.task }}"
+          echo "Repo: ${{ inputs.repo }}"
+          echo "Difficulty: $DIFFICULTY"
+          echo "Repo URL: $REPO_URL"
+          echo "MCP Enabled: ${{ inputs.enable_mcp }}"
+
+      - name: Load repo and task configuration
+        id: config
+        run: |
+          # Use task-specific configuration loader
+          echo "Resolving configuration for repo=${{ inputs.repo }} task=${{ inputs.task }} mcp=${{ inputs.enable_mcp }}"
+
+          # Install PyYAML if not available
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+
+          # Use Python configuration loader for task-specific resolution
+          CONFIG_OUTPUT=$(python3 datasets/common/config_loader.py "${{ inputs.repo }}" "${{ inputs.task }}" "${{ inputs.enable_mcp }}")
+
+          # Parse output and set GitHub Actions variables
+          echo "$CONFIG_OUTPUT" >> $GITHUB_OUTPUT
+
+          # Extract values for logging
+          AR_IMAGE=$(echo "$CONFIG_OUTPUT" | grep "ar_image=" | cut -d'=' -f2-)
+          TIMEMACHINE_DATE=$(echo "$CONFIG_OUTPUT" | grep "timemachine_date=" | cut -d'=' -f2-)
+          PYTHON_VERSION=$(echo "$CONFIG_OUTPUT" | grep "python_version=" | cut -d'=' -f2-)
+          MCP_URL=$(echo "$CONFIG_OUTPUT" | grep "mcp_url=" | cut -d'=' -f2-)
+
+          # Log resolved configuration
+          echo "✅ Configuration resolved:"
+          echo "  Image: $AR_IMAGE"
+          if [ -n "$TIMEMACHINE_DATE" ] && [ "$TIMEMACHINE_DATE" != "None" ]; then
+            echo "  Timemachine Date: $TIMEMACHINE_DATE"
+          fi
+          if [ -n "$PYTHON_VERSION" ] && [ "$PYTHON_VERSION" != "None" ]; then
+            echo "  Python Version: $PYTHON_VERSION"
+          fi
+          if [ "${{ inputs.enable_mcp }}" = "true" ]; then
+            if [ -n "$MCP_URL" ]; then
+              echo "  MCP URL: $MCP_URL"
+            else
+              echo "  ⚠️  MCP enabled but no URL configured"
+            fi
+          else
+            echo "  MCP: Disabled (baseline run)"
+          fi
+
+
+      - name: Setup unique results directory
+        id: results
+        run: |
+          # Generate unique directory name using run_id, run_number, and timestamp
+          UNIQUE_DIR="results-${{ github.run_id }}-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          UNIQUE_PATH="${{ github.workspace }}/${UNIQUE_DIR}"
+
+          echo "dir=${UNIQUE_DIR}" >> $GITHUB_OUTPUT
+          echo "path=${UNIQUE_PATH}" >> $GITHUB_OUTPUT
+
+          # Create the directory
+          mkdir -p "${UNIQUE_PATH}"
+
+          echo "Created unique results directory: ${UNIQUE_DIR}"
+          echo "Full path: ${UNIQUE_PATH}"
+
+      - name: Configure Docker for pulling from registries
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull prebaked image
+        run: docker pull ${{ steps.config.outputs.ar_image }}
+
+      - name: Resolve API keys
+        id: apikey
+        run: |
+          # Resolve API key based on selected agent
+          case "${{ inputs.agent }}" in
+            claude)
+              if [ -n "${{ inputs.anthropic_api_key }}" ]; then
+                echo "Using Anthropic API key from workflow input"
+                echo "anthropic_key=${{ inputs.anthropic_api_key }}" >> $GITHUB_OUTPUT
+              else
+                echo "Using Anthropic API key from repository secret"
+                echo "anthropic_key=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            codex)
+              if [ -n "${{ inputs.openai_api_key }}" ]; then
+                echo "Using OpenAI API key from workflow input"
+                echo "openai_key=${{ inputs.openai_api_key }}" >> $GITHUB_OUTPUT
+              else
+                echo "Using OpenAI API key from repository secret"
+                echo "openai_key=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            gemini)
+              if [ -n "${{ inputs.gemini_api_key }}" ]; then
+                echo "Using Gemini API key from workflow input"
+                echo "gemini_key=${{ inputs.gemini_api_key }}" >> $GITHUB_OUTPUT
+              else
+                echo "Using Gemini API key from repository secret"
+                echo "gemini_key=${{ secrets.GEMINI_API_KEY }}" >> $GITHUB_OUTPUT
+              fi
+              ;;
+          esac
+
+      - name: Run task with AI Agent
+        id: run
+        timeout-minutes: 45
+        env:
+          MCP_CONFIG: ${{ steps.config.outputs.mcp_config }}
+        run: |
+          # Clear any existing results to avoid contamination from previous runs
+          # Results directory already created with unique name in previous step
+
+          # Copy task files for container
+          cp /tmp/before_repo_set_cmd.txt ${{ github.workspace }}/before_repo_set_cmd.txt
+
+          cp /tmp/instruction.txt ${{ github.workspace }}/instruction.txt
+          cp /tmp/fail_to_pass.txt ${{ github.workspace }}/fail_to_pass.txt
+          cp /tmp/pass_to_pass.txt ${{ github.workspace }}/pass_to_pass.txt
+          cp "${{ steps.task.outputs.run_script }}" ${{ github.workspace }}/run_script.sh
+
+          # Copy setup script if it exists
+          SETUP_SCRIPT="${{ steps.task.outputs.setup_script }}"
+          if [ -n "$SETUP_SCRIPT" ] && [ -f "$SETUP_SCRIPT" ]; then
+            cp "$SETUP_SCRIPT" ${{ github.workspace }}/setup.sh
+            echo "Copied setup script: $SETUP_SCRIPT"
+          else
+            # Create empty setup script as fallback
+            echo '#!/bin/bash' > ${{ github.workspace }}/setup.sh
+            echo '# No task-specific setup script found' >> ${{ github.workspace }}/setup.sh
+            echo 'echo "WARNING: No setup.sh for this task, using generic fallback"' >> ${{ github.workspace }}/setup.sh
+          fi
+
+          # Build MCP flags if enabled
+          MCP_FLAGS=""
+          if [ -n "$MCP_CONFIG" ] || [ -n "${{ steps.config.outputs.mcp_url }}" ]; then
+            echo "MCP enabled - URL: ${{ steps.config.outputs.mcp_url }}"
+            if [ -n "$MCP_CONFIG" ]; then
+              echo "Using MCP_CONFIG (legacy mode)"
+              MCP_FLAGS="--mcp-config '$MCP_CONFIG'"
+            else
+              echo "Using MCP_URL/MCP_TOKEN mode"
+            fi
+          else
+            echo "MCP disabled - baseline run"
+          fi
+
+          # Set agent-specific variables
+          case "${{ inputs.agent }}" in
+            claude)
+              AGENT_SCRIPT="run_claude.py"
+              API_KEY_ENV="-e ANTHROPIC_API_KEY=${{ steps.apikey.outputs.anthropic_key }}"
+              MODEL_ENV="-e MODEL=${{ inputs.model }}"
+              ;;
+            codex)
+              AGENT_SCRIPT="run_codex.py"
+              API_KEY_ENV="-e OPENAI_API_KEY=${{ steps.apikey.outputs.openai_key }}"
+              MODEL_ENV="-e OPENAI_MODEL=${{ inputs.model }}"
+              ;;
+            gemini)
+              AGENT_SCRIPT="run_gemini.py"
+              API_KEY_ENV="-e GEMINI_API_KEY=${{ steps.apikey.outputs.gemini_key }}"
+              MODEL_ENV="-e GEMINI_MODEL=${{ inputs.model }}"
+              ;;
+          esac
+
+          echo "Running with agent: ${{ inputs.agent }}"
+          echo "Using script: $AGENT_SCRIPT"
+          echo "Model: ${{ inputs.model }}"
+
+          # Run container with selected AI agent
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ steps.results.outputs.path }}:/results \
+            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt:ro \
+            -v ${{ github.workspace }}/instruction.txt:/instruction.txt:ro \
+            -v ${{ github.workspace }}/fail_to_pass.txt:/fail_to_pass.txt:ro \
+            -v ${{ github.workspace }}/pass_to_pass.txt:/pass_to_pass.txt:ro \
+            -v ${{ github.workspace }}/run_script.sh:/run_script.sh \
+            -v ${{ github.workspace }}/setup.sh:/setup.sh \
+            -v ${{ github.workspace }}/datasets/${{ inputs.repo }}/$AGENT_SCRIPT:/run_agent.py:ro \
+            -v ${{ github.workspace }}/datasets/${{ inputs.repo }}/base_agent_adapter.py:/base_agent_adapter.py:ro \
+            $API_KEY_ENV \
+            $MODEL_ENV \
+            -e MODEL="${{ inputs.model }}" \
+            -e TASK_ID="${{ inputs.task }}" \
+            -e REPO_URL="${{ steps.task.outputs.repo_url }}" \
+            -e MCP_CONFIG='${{ steps.config.outputs.mcp_config }}' \
+            -e MCP_URL="${{ steps.config.outputs.mcp_url }}" \
+            -e MCP_TOKEN="${{ secrets.MCP_TOKEN }}" \
+            -e CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT=1 \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+
+              echo "=== Step 0: Clear old results ==="
+              echo "Using unique results directory - no cleanup needed"
+
+              echo "=== Step 1: Clone repository ==="
+              if [ ! -d "/testbed/.git" ]; then
+                echo "Cloning $REPO_URL to /testbed..."
+                git clone "$REPO_URL" /testbed
+              else
+                echo "Repository already exists at /testbed"
+              fi
+              cd /testbed
+
+              echo ""
+              echo "=== Step 2: Setup repo (before_repo_set_cmd) ==="
+              while IFS= read -r cmd || [ -n "$cmd" ]; do
+                if [ -n "$cmd" ]; then
+                  echo "Running: $cmd"
+                  eval "$cmd" || echo "Warning: command failed (may be expected)"
+                fi
+              done < /before_repo_set_cmd.txt
+
+              echo ""
+              echo "=== Step 3: Provision (task-specific setup.sh) ==="
+              if [ -f "/setup.sh" ]; then
+                echo "Running task-specific provisioning script..."
+                chmod +x /setup.sh
+                source /setup.sh
+                echo "Provisioning complete"
+              else
+                echo "ERROR: No setup.sh found"
+                exit 1
+              fi
+
+              echo ""
+              echo "=== Step 4: Verify tests FAIL before fix ==="
+              # Read fail_to_pass tests into array
+              mapfile -t FAIL_TO_PASS < /fail_to_pass.txt
+              echo "Running tests: ${FAIL_TO_PASS[@]}"
+              chmod +x /run_script.sh
+              if VERIFICATION_PHASE=pre /run_script.sh "${FAIL_TO_PASS[@]}" > /results/pre_verification.log 2>&1; then
+                echo "WARNING: Tests passed BEFORE fix - task may be invalid"
+              else
+                echo "Good: Tests fail before fix (expected)"
+              fi
+
+              echo ""
+              echo "=== Step 4b: Verify P2P tests PASS before fix ==="
+              mapfile -t PASS_TO_PASS < /pass_to_pass.txt
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=pre /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_pre_verification.log 2>&1
+                P2P_PRE_EXIT=$?
+                set -e
+                echo "P2P pre-check exit: $P2P_PRE_EXIT"
+              else
+                echo "No pass_to_pass tests for this task"
+                echo "No pass_to_pass tests." > /results/p2p_pre_verification.log
+                P2P_PRE_EXIT=0
+              fi
+              echo "$P2P_PRE_EXIT" > /results/.p2p_pre_exit
+
+              echo ""
+              echo "=== Step 5: Run AI Agent ==="
+              echo "Model: $MODEL"
+              echo "Agent: ${{ inputs.agent }}"
+
+              # Copy base_agent_adapter.py to the same directory as the agent script
+              cp /base_agent_adapter.py /testbed/base_agent_adapter.py 2>/dev/null || true
+
+              # Run the selected agent
+              python3 /run_agent.py 2>&1 | tee /results/agent.log
+
+              AGENT_EXIT=$?
+              echo "Agent exit code: $AGENT_EXIT"
+
+              echo ""
+              echo "=== DEBUG: Check files immediately after Claude exit ==="
+              echo "Git status:"
+              git status
+              echo "Git diff --stat:"
+              git diff --stat
+              echo "=== END DEBUG ==="
+
+              echo ""
+              echo "=== Creating patch file (before verification) ==="
+              echo "Current directory: $(pwd)"
+              echo "Git status before creating patch:"
+              git status --short
+              echo "Git diff stats:"
+              git diff --stat
+              echo "Creating patch file..."
+              git diff > /results/changes.patch
+              PATCH_CREATE_EXIT=$?
+              echo "Git diff exit code: $PATCH_CREATE_EXIT"
+
+              # Check if patch file was created
+              if [ -f "/results/changes.patch" ]; then
+                PATCH_SIZE=$(stat -c%s /results/changes.patch)
+                echo "Patch file created successfully, size: $PATCH_SIZE bytes"
+                if [ $PATCH_SIZE -eq 0 ]; then
+                  echo "WARNING: Patch file is empty!"
+                  echo "Checking for staged changes:"
+                  git diff --cached --stat
+                  echo "Creating patch with staged changes if any:"
+                  git diff --cached > /results/changes_staged.patch
+                  if [ -s "/results/changes_staged.patch" ]; then
+                    echo "Found staged changes, using those for patch"
+                    mv /results/changes_staged.patch /results/changes.patch
+                  fi
+                fi
+              else
+                echo "ERROR: Patch file was not created!"
+              fi
+
+              echo ""
+              echo "=== Step 6: Run verification tests ==="
+              VERIFICATION_PHASE=post /run_script.sh "${FAIL_TO_PASS[@]}" > /results/verification.log 2>&1
+              VERIFY_EXIT=$?
+
+              echo "Verification exit code: $VERIFY_EXIT"
+              cat /results/verification.log
+
+              echo ""
+              echo "=== Step 7: Verify P2P tests still PASS after fix ==="
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=post /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_verification.log 2>&1
+                P2P_POST_EXIT=$?
+                set -e
+                echo "P2P post-check exit: $P2P_POST_EXIT"
+              else
+                echo "No pass_to_pass tests." > /results/p2p_verification.log
+                P2P_POST_EXIT=0
+              fi
+              echo "$P2P_POST_EXIT" > /results/.p2p_post_exit
+
+              # Generate result JSON
+              if [ $VERIFY_EXIT -eq 0 ]; then
+                STATUS="success"
+              else
+                STATUS="failed"
+              fi
+
+              if [ -n "$MCP_CONFIG" ]; then
+                MCP_ENABLED="true"
+              else
+                MCP_ENABLED="false"
+              fi
+
+              cat > /results/result.json << RESULT_EOF
+          {
+            "task": "$TASK_ID",
+            "status": "$STATUS",
+            "model": "$MODEL",
+            "mcp_enabled": $MCP_ENABLED,
+            "agent_exit_code": $AGENT_EXIT,
+            "verification_exit_code": $VERIFY_EXIT,
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          RESULT_EOF
+
+              echo "Contents of /results directory:"
+              ls -la /results/
+              echo "$AGENT_EXIT" > /results/.agent_exit
+              echo "$VERIFY_EXIT" > /results/.verify_exit
+
+              exit $VERIFY_EXIT
+            '
+        continue-on-error: true
+
+      - name: Extract enhanced metrics
+        if: always()
+        env:
+          TASK_ID: ${{ inputs.task }}
+          MODEL: ${{ inputs.model }}
+          MCP_CONFIG: ${{ steps.config.outputs.mcp_config }}
+          REPO_NAME: ${{ inputs.repo }}
+          FAIL_TO_PASS_FILE: ${{ github.workspace }}/fail_to_pass.txt
+          PASS_TO_PASS_FILE: ${{ github.workspace }}/pass_to_pass.txt
+        run: |
+          cd ${{ github.workspace }}
+
+          AGENT_EXIT=$(cat ${{ steps.results.outputs.path }}/.agent_exit 2>/dev/null || echo "1")
+          VERIFY_EXIT=$(cat ${{ steps.results.outputs.path }}/.verify_exit 2>/dev/null || echo "1")
+
+          sudo rm -f ${{ steps.results.outputs.path }}/result.json
+
+          if [ -f "datasets/${{ inputs.repo }}/extract_metrics.py" ]; then
+            RESULTS_DIR="${{ steps.results.outputs.path }}" \
+            AGENT_EXIT_CODE="$AGENT_EXIT" \
+            VERIFY_EXIT_CODE="$VERIFY_EXIT" \
+            TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            python3 datasets/${{ inputs.repo }}/extract_metrics.py
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          RESULT_FILE="${{ steps.results.outputs.path }}/result.json"
+
+          echo "# SWE-bench Task Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$RESULT_FILE" ]; then
+            STATUS=$(jq -r '.status' "$RESULT_FILE")
+            RESOLVED=$(jq -r '.resolved' "$RESULT_FILE")
+            TESTS_PASSED=$(jq -r '.tests.passed // 0' "$RESULT_FILE")
+            TESTS_TOTAL=$(jq -r '.tests.total // 0' "$RESULT_FILE")
+            DURATION=$(jq -r '.duration_seconds // 0' "$RESULT_FILE")
+            COST=$(jq -r '.total_cost_usd // 0' "$RESULT_FILE")
+
+            if [ "$RESOLVED" = "true" ]; then
+              echo "## Result: **RESOLVED** :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## Result: **UNRESOLVED** :x:" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Task** | \`${{ inputs.task }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Repo** | ${{ inputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Model** | ${{ inputs.model }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **MCP Enabled** | ${{ inputs.enable_mcp }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **MCP URL** | ${{ steps.config.outputs.mcp_url || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Tests (F2P)** | ${TESTS_PASSED}/${TESTS_TOTAL} passed |" >> $GITHUB_STEP_SUMMARY
+
+            P2P_NO_REG=$(jq -r '.p2p_no_regression // "N/A"' "$RESULT_FILE")
+            P2P_PASSED=$(jq -r '.p2p_tests.passed // 0' "$RESULT_FILE")
+            P2P_TOTAL=$(jq -r '.p2p_tests.total // 0' "$RESULT_FILE")
+            if [ "$P2P_TOTAL" != "0" ]; then
+              echo "| **Tests (P2P)** | ${P2P_PASSED}/${P2P_TOTAL} passed (regression: $([ "$P2P_NO_REG" = "true" ] && echo "none" || echo "DETECTED")) |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| **Tests (P2P)** | No P2P tests |" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "| **Duration** | ${DURATION}s |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Cost** | \$${COST} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Result: **error** (no result file)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-result-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.results.outputs.path }}/
+          retention-days: 90
+
+

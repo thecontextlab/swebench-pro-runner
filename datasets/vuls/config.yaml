@@ -1,0 +1,45 @@
+# SWE-bench Pro Configuration for vuls
+# This file configures how tasks are executed in this repository
+
+repository: future-architect/vuls
+language: go
+
+# Docker image from Artifact Registry (prebaked environment)
+# Updated with multi-agent CLI support (Node.js 20, Codex, Gemini, Claude)
+image: ghcr.io/thecontextlab/swebench-pro-vuls:multi-agent
+
+# Execution settings
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+
+# Default agent configuration
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed vuls codebase"
+
+# Task metadata
+tasks:
+  count: 67
+  source: 
+  pattern: future-architect__vuls-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "Agent-less vulnerability scanner for Linux, FreeBSD, containers"
+  lines_of_code: 40000
+  architecture: monolith
+  complexity: medium
+  github_stars: 11000
+  first_commit: "2016-03"
+  key_challenges:
+    - Multiple vulnerability database integrations (NVD, OVAL)
+    - Package manager parsing (apt, yum, apk)
+    - Remote scanning via SSH
+    - Container image scanning
+    - Report generation and integration

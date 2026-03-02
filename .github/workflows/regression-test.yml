@@ -1,0 +1,411 @@
+name: Regression Test (pass_to_pass)
+
+run-name: "regression | ${{ inputs.repo }} | ${{ inputs.task }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repository (e.g., vuls, flipt, teleport)'
+        required: true
+        type: choice
+        options:
+          - vuls
+          - flipt
+          - teleport
+          - navidrome
+          - ansible
+          - element-web
+          - NodeBB
+          - openlibrary
+          - qutebrowser
+          - tutanota
+          - webclients
+      task:
+        description: 'Task ID (e.g., future-architect__vuls-01441351c3407abfc21c48a38e28828e1b504e0c)'
+        required: true
+        type: string
+      patch_run_id:
+        description: 'GitHub Actions run ID containing the changes.patch artifact'
+        required: true
+        type: string
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout eval-runner
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Load task configuration
+        id: task
+        run: |
+          TASK_FILE="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.yaml"
+          if [ ! -f "$TASK_FILE" ]; then
+            echo "ERROR: Task file not found: $TASK_FILE"
+            echo "Available tasks:"
+            ls datasets/${{ inputs.repo }}/tasks/ | head -10
+            exit 1
+          fi
+
+          echo "task_file=$TASK_FILE" >> $GITHUB_OUTPUT
+
+          # Extract fields
+          REPO_URL=$(yq '.repo_url' "$TASK_FILE")
+          echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+
+          # Extract before_repo_set_cmd (multiline)
+          yq '.swebench.before_repo_set_cmd' "$TASK_FILE" > /tmp/before_repo_set_cmd.txt
+
+          # Extract fail_to_pass and pass_to_pass tests using Python
+          # (yq mangles test names containing \n — Python preserves them as-is)
+          python3 -c "
+          import yaml, sys
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          sb = data.get('swebench', {})
+          f2p = sb.get('fail_to_pass', []) or []
+          p2p = sb.get('pass_to_pass', []) or []
+          with open('/tmp/fail_to_pass.txt', 'w') as out:
+              for t in f2p:
+                  out.write(str(t) + '\n')
+          with open('/tmp/pass_to_pass.txt', 'w') as out:
+              for t in p2p:
+                  out.write(str(t) + '\n')
+          print(f'f2p={len(f2p)}')
+          print(f'p2p={len(p2p)}')
+          "
+          F2P_COUNT=$(python3 -c "
+          import yaml
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          print(len(data.get('swebench', {}).get('fail_to_pass', []) or []))
+          ")
+          P2P_COUNT=$(python3 -c "
+          import yaml
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          print(len(data.get('swebench', {}).get('pass_to_pass', []) or []))
+          ")
+          echo "f2p_count=$F2P_COUNT" >> $GITHUB_OUTPUT
+          echo "p2p_count=$P2P_COUNT" >> $GITHUB_OUTPUT
+
+          # Check for task-specific setup script
+          SETUP_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.setup.sh"
+          if [ -f "$SETUP_SCRIPT" ]; then
+            echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
+          else
+            echo "setup_script=" >> $GITHUB_OUTPUT
+            echo "WARNING: No setup script found at $SETUP_SCRIPT"
+          fi
+
+          # Check for task-specific run_script.sh
+          RUN_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.run_script.sh"
+          if [ -f "$RUN_SCRIPT" ]; then
+            echo "run_script=$RUN_SCRIPT" >> $GITHUB_OUTPUT
+          else
+            echo "ERROR: No run_script.sh found at $RUN_SCRIPT"
+            exit 1
+          fi
+
+          echo "Task: ${{ inputs.task }}"
+          echo "Repo: ${{ inputs.repo }}"
+          echo "Repo URL: $REPO_URL"
+          echo "F2P tests: $F2P_COUNT"
+          echo "P2P tests: $P2P_COUNT"
+
+      - name: Load repo and task configuration
+        id: config
+        run: |
+          echo "Resolving configuration for repo=${{ inputs.repo }} task=${{ inputs.task }}"
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+          CONFIG_OUTPUT=$(python3 datasets/common/config_loader.py "${{ inputs.repo }}" "${{ inputs.task }}" "false")
+          echo "$CONFIG_OUTPUT" >> $GITHUB_OUTPUT
+
+          AR_IMAGE=$(echo "$CONFIG_OUTPUT" | grep "ar_image=" | cut -d'=' -f2-)
+          echo "Image: $AR_IMAGE"
+
+      - name: Setup unique results directory
+        id: results
+        run: |
+          UNIQUE_DIR="results-${{ github.run_id }}-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          UNIQUE_PATH="${{ github.workspace }}/${UNIQUE_DIR}"
+          echo "dir=${UNIQUE_DIR}" >> $GITHUB_OUTPUT
+          echo "path=${UNIQUE_PATH}" >> $GITHUB_OUTPUT
+          mkdir -p "${UNIQUE_PATH}"
+
+      - name: Configure Docker for pulling from registries
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull prebaked image
+        run: docker pull ${{ steps.config.outputs.ar_image }}
+
+      - name: Download patch from evaluation run
+        run: |
+          # Download the artifact from the specified run
+          gh run download "${{ inputs.patch_run_id }}" \
+            --name "swebench-result-${{ inputs.task }}-*" \
+            --dir /tmp/eval-artifact || true
+
+          # Find and copy the patch file
+          PATCH_FILE=$(find /tmp/eval-artifact -name "changes.patch" -type f | head -1)
+          if [ -n "$PATCH_FILE" ]; then
+            cp "$PATCH_FILE" ${{ github.workspace }}/changes.patch
+            PATCH_SIZE=$(stat -c%s ${{ github.workspace }}/changes.patch 2>/dev/null || stat -f%z ${{ github.workspace }}/changes.patch)
+            echo "Patch downloaded: $PATCH_SIZE bytes"
+          else
+            echo "WARNING: No changes.patch found in run ${{ inputs.patch_run_id }}"
+            touch ${{ github.workspace }}/changes.patch
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run regression tests (4 phases)
+        id: run
+        timeout-minutes: 25
+        run: |
+          # Copy task files for container
+          cp /tmp/before_repo_set_cmd.txt ${{ github.workspace }}/before_repo_set_cmd.txt
+          cp /tmp/fail_to_pass.txt ${{ github.workspace }}/fail_to_pass.txt
+          cp /tmp/pass_to_pass.txt ${{ github.workspace }}/pass_to_pass.txt
+          cp "${{ steps.task.outputs.run_script }}" ${{ github.workspace }}/run_script.sh
+
+          # Copy setup script if it exists
+          SETUP_SCRIPT="${{ steps.task.outputs.setup_script }}"
+          if [ -n "$SETUP_SCRIPT" ] && [ -f "$SETUP_SCRIPT" ]; then
+            cp "$SETUP_SCRIPT" ${{ github.workspace }}/setup.sh
+          else
+            echo '#!/bin/bash' > ${{ github.workspace }}/setup.sh
+            echo 'echo "WARNING: No setup.sh for this task"' >> ${{ github.workspace }}/setup.sh
+          fi
+
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ steps.results.outputs.path }}:/results \
+            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt:ro \
+            -v ${{ github.workspace }}/fail_to_pass.txt:/fail_to_pass.txt:ro \
+            -v ${{ github.workspace }}/pass_to_pass.txt:/pass_to_pass.txt:ro \
+            -v ${{ github.workspace }}/run_script.sh:/run_script.sh \
+            -v ${{ github.workspace }}/setup.sh:/setup.sh \
+            -v ${{ github.workspace }}/changes.patch:/changes.patch:ro \
+            -e TASK_ID="${{ inputs.task }}" \
+            -e REPO_URL="${{ steps.task.outputs.repo_url }}" \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+
+              echo "=== Regression Test: $TASK_ID ==="
+              echo "Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+              echo ""
+              echo "=== Step 1: Clone repository ==="
+              if [ ! -d "/testbed/.git" ]; then
+                echo "Cloning $REPO_URL to /testbed..."
+                git clone "$REPO_URL" /testbed
+              else
+                echo "Repository already exists at /testbed"
+              fi
+              cd /testbed
+
+              echo ""
+              echo "=== Step 2: Setup repo (before_repo_set_cmd) ==="
+              while IFS= read -r cmd || [ -n "$cmd" ]; do
+                if [ -n "$cmd" ]; then
+                  echo "Running: $cmd"
+                  eval "$cmd" || echo "Warning: command failed (may be expected)"
+                fi
+              done < /before_repo_set_cmd.txt
+
+              echo ""
+              echo "=== Step 3: Provision (task-specific setup.sh) ==="
+              if [ -f "/setup.sh" ]; then
+                chmod +x /setup.sh
+                source /setup.sh
+                echo "Provisioning complete"
+              fi
+
+              # Read test lists
+              mapfile -t FAIL_TO_PASS < /fail_to_pass.txt
+              mapfile -t PASS_TO_PASS < /pass_to_pass.txt
+              chmod +x /run_script.sh
+
+              echo ""
+              echo "F2P tests: ${#FAIL_TO_PASS[@]}"
+              echo "P2P tests: ${#PASS_TO_PASS[@]}"
+
+              # Disable set -e for test phases — tests return non-zero exit
+              # codes which we capture explicitly
+              set +e
+
+              # ---------------------------------------------------------------
+              # Phase 1: PRE-PATCH pass_to_pass (expect PASS)
+              # ---------------------------------------------------------------
+              echo ""
+              echo "=== Phase 1: PRE-PATCH pass_to_pass ==="
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                VERIFICATION_PHASE=pre /run_script.sh "${PASS_TO_PASS[@]}" > /results/pass_to_pass_pre.log 2>&1
+                P2P_PRE_EXIT=$?
+                echo "Phase 1 exit code: $P2P_PRE_EXIT"
+              else
+                echo "No pass_to_pass tests — skipping phase 1"
+                echo "No pass_to_pass tests for this task." > /results/pass_to_pass_pre.log
+                P2P_PRE_EXIT=0
+              fi
+              echo "$P2P_PRE_EXIT" > /results/.p2p_pre_exit
+
+              # ---------------------------------------------------------------
+              # Phase 2: PRE-PATCH fail_to_pass (expect FAIL)
+              # ---------------------------------------------------------------
+              echo ""
+              echo "=== Phase 2: PRE-PATCH fail_to_pass ==="
+              VERIFICATION_PHASE=pre /run_script.sh "${FAIL_TO_PASS[@]}" > /results/fail_to_pass_pre.log 2>&1
+              F2P_PRE_EXIT=$?
+              echo "Phase 2 exit code: $F2P_PRE_EXIT"
+              echo "$F2P_PRE_EXIT" > /results/.f2p_pre_exit
+
+              # Re-enable set -e for patch application
+              set -e
+
+              # ---------------------------------------------------------------
+              # Phase 3: Apply patch
+              # ---------------------------------------------------------------
+              echo ""
+              echo "=== Phase 3: Apply changes.patch ==="
+              if [ -s /changes.patch ]; then
+                git apply /changes.patch > /results/patch_apply.log 2>&1
+                PATCH_EXIT=$?
+                echo "Patch apply exit code: $PATCH_EXIT"
+                if [ $PATCH_EXIT -ne 0 ]; then
+                  echo "ERROR: Patch application failed"
+                  cat /results/patch_apply.log
+                  echo "$PATCH_EXIT" > /results/.patch_exit
+                  echo "skip" > /results/.f2p_post_exit
+                  echo "skip" > /results/.p2p_post_exit
+                  echo "Patch application failed — skipping post-patch phases" > /results/fail_to_pass_post.log
+                  echo "Patch application failed — skipping post-patch phases" > /results/pass_to_pass_post.log
+                  echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  exit 0
+                fi
+                echo "Patch applied successfully"
+                git diff --stat
+              else
+                echo "Empty patch (no code changes)"
+                echo "Empty patch — no changes to apply" > /results/patch_apply.log
+                PATCH_EXIT=0
+              fi
+              echo "$PATCH_EXIT" > /results/.patch_exit
+
+              # Disable set -e for post-patch test phases
+              set +e
+
+              # ---------------------------------------------------------------
+              # Phase 4: POST-PATCH fail_to_pass (expect PASS)
+              # ---------------------------------------------------------------
+              echo ""
+              echo "=== Phase 4: POST-PATCH fail_to_pass ==="
+              VERIFICATION_PHASE=post /run_script.sh "${FAIL_TO_PASS[@]}" > /results/fail_to_pass_post.log 2>&1
+              F2P_POST_EXIT=$?
+              echo "Phase 4 exit code: $F2P_POST_EXIT"
+              echo "$F2P_POST_EXIT" > /results/.f2p_post_exit
+
+              # ---------------------------------------------------------------
+              # Phase 5: POST-PATCH pass_to_pass (expect PASS — regression check)
+              # ---------------------------------------------------------------
+              echo ""
+              echo "=== Phase 5: POST-PATCH pass_to_pass ==="
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                VERIFICATION_PHASE=post /run_script.sh "${PASS_TO_PASS[@]}" > /results/pass_to_pass_post.log 2>&1
+                P2P_POST_EXIT=$?
+                echo "Phase 5 exit code: $P2P_POST_EXIT"
+              else
+                echo "No pass_to_pass tests — skipping phase 5"
+                echo "No pass_to_pass tests for this task." > /results/pass_to_pass_post.log
+                P2P_POST_EXIT=0
+              fi
+              echo "$P2P_POST_EXIT" > /results/.p2p_post_exit
+
+              echo ""
+              echo "=== All phases complete ==="
+              echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "P2P_PRE=$P2P_PRE_EXIT  F2P_PRE=$F2P_PRE_EXIT  PATCH=$PATCH_EXIT  F2P_POST=$F2P_POST_EXIT  P2P_POST=$P2P_POST_EXIT"
+              ls -la /results/
+            '
+        continue-on-error: true
+
+      - name: Generate regression result
+        if: always()
+        env:
+          TASK_ID: ${{ inputs.task }}
+          REPO_NAME: ${{ inputs.repo }}
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+
+          RESULTS_DIR="${{ steps.results.outputs.path }}" \
+          TASK_YAML_DIR="${{ github.workspace }}/datasets" \
+          F2P_COUNT="${{ steps.task.outputs.f2p_count }}" \
+          P2P_COUNT="${{ steps.task.outputs.p2p_count }}" \
+          python3 scripts/eval-orchestration/generate_regression_result.py
+
+      - name: Generate summary
+        if: always()
+        run: |
+          RESULT_FILE="${{ steps.results.outputs.path }}/regression_result.json"
+
+          echo "# Regression Test Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$RESULT_FILE" ]; then
+            F2P_RESOLVED=$(jq -r '.results.f2p_resolved' "$RESULT_FILE")
+            P2P_NO_REG=$(jq -r '.results.p2p_no_regression' "$RESULT_FILE")
+            FULLY=$(jq -r '.results.fully_resolved' "$RESULT_FILE")
+            HAS_P2P=$(jq -r '.has_p2p' "$RESULT_FILE")
+
+            if [ "$FULLY" = "true" ]; then
+              echo "## Result: **FULLY RESOLVED** :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            elif [ "$F2P_RESOLVED" = "true" ] && [ "$P2P_NO_REG" = "false" ]; then
+              echo "## Result: **REGRESSION DETECTED** :warning:" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## Result: **NOT RESOLVED** :x:" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Task** | \`${{ inputs.task }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Repo** | ${{ inputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **F2P Resolved** | $F2P_RESOLVED |" >> $GITHUB_STEP_SUMMARY
+            echo "| **P2P No Regression** | $P2P_NO_REG |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Has P2P Tests** | $HAS_P2P |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Fully Resolved** | $FULLY |" >> $GITHUB_STEP_SUMMARY
+
+            # Show phase details
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Phase Results" >> $GITHUB_STEP_SUMMARY
+            echo "| Phase | Expected | Passed | Failed | Verdict |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|----------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+            for phase in p2p_pre f2p_pre f2p_post p2p_post; do
+              EXPECTED=$(jq -r ".phases.${phase}.tests_expected" "$RESULT_FILE")
+              PASSED=$(jq -r ".phases.${phase}.tests_passed" "$RESULT_FILE")
+              FAILED=$(jq -r ".phases.${phase}.tests_failed" "$RESULT_FILE")
+              VERDICT=$(jq -r ".phases.${phase}.verdict" "$RESULT_FILE")
+              echo "| $phase | $EXPECTED | $PASSED | $FAILED | $VERDICT |" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "## Result: **error** (no regression_result.json)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-result-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.results.outputs.path }}/
+          retention-days: 90

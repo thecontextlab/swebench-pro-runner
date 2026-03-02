@@ -1,0 +1,126 @@
+# SWE-bench Pro Configuration for ansible with Task Groups
+# This file demonstrates task-specific image configuration
+
+repository: ansible/ansible
+language: python
+
+# Default image for repository (fallback) - Python 3.11 for most modern tasks
+image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+
+workdir: /testbed
+timeout_minutes: 45
+max_concurrent: 5
+
+agent:
+  type: claude-code
+  default_model: claude-sonnet-4-5-20250929
+
+# MCP server for A/B testing
+mcp:
+  url: # MCP server URL (configure your own)
+  description: "MCP server - indexed ansible codebase"
+  # Token stored in GitHub Secrets: MCP_TOKEN_ANSIBLE
+  token_secret_name: "MCP_TOKEN_ANSIBLE"
+
+# Task group configurations based on SWE-bench_Pro-os investigation
+task_groups:
+  # Tasks requiring Python 3.9 (verified from SWE-bench_Pro-os dockerfiles)
+  python39_legacy:
+    image: ghcr.io/thecontextlab/swebench-pro-ansible:multi-agent
+    pattern: "ansible__ansible-.*-v(ba6da65a0f3baefda7a058ebbd0a8dcafb8512f5|1055803c3a812189a1133297f7f5468579283f86)"
+    description: "Legacy tasks requiring Python 3.9 (ubuntu:20.04 and python:3.9-slim based)"
+    python_version: "3.9"
+    timemachine_date: "2020-12-09"
+
+  # Tasks requiring Python 3.11 (verified from SWE-bench_Pro-os dockerfiles)
+  python311_modern:
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    pattern: "ansible__ansible-.*-v(30a923fb5c164d6cd18280c02422f75e611e8fb2|0f01c69f1e2528b935359cfe578530722bca2c59)"
+    description: "Modern tasks requiring Python 3.11 (python:3.11-slim based)"
+    python_version: "3.11"
+    timemachine_date: "2022-10-06"
+
+  # Tasks with special dependency requirements
+  special_deps:
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    pattern: "ansible__ansible-.*-v7eee2454f617569fd6889f2211f75bc02a35f9f8"
+    description: "Tasks with special dependency requirements"
+    python_version: "3.11"
+    timemachine_date: "2021-09-07"
+
+# Task-specific overrides for edge cases
+task_overrides:
+  # Pilot tasks - corrected based on SWE-bench_Pro-os investigation
+  "ansible__ansible-0ea40e09d1b35bcb69ff4d9cecf3d0defa4b36e8":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2023-09-19"
+    description: "Pilot task 1 - v30a923fb pattern requires Python 3.11"
+
+  "ansible__ansible-0fd88717c953b92ed8a50495d55e630eb5d59166":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible:multi-agent
+    timemachine_date: "2023-03-27"
+    description: "Pilot task 2 - requires specific timemachine date"
+
+  "ansible__ansible-106909db8b730480615f4a33de0eb5b710944e78":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2024-12-10"
+    description: "Pilot task 3 - modern task, Python 3.11 compatible"
+
+  "ansible__ansible-11c1777d56664b1acb56b387a1ad6aeadef1391d":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2022-10-06"
+    description: "Pilot task 4 - verified working setup"
+
+  "ansible__ansible-12734fa21c08a0ce8c84e533abdc560db2eb1955":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2021-09-07"
+    description: "Pilot task 5"
+
+  "ansible__ansible-164881d871964aa64e0f911d03ae270acbad253c":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2025-08-26"
+    description: "Pilot task 6"
+
+  "ansible__ansible-185d41031660a676c43fbb781cd1335902024bfe":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible:multi-agent
+    timemachine_date: "2021-04-16"
+    description: "Pilot task 7 - requires Python 3.9"
+
+  "ansible__ansible-189fcb37f973f0b1d52b555728208eeb9a6fce83":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2025-08-26"
+    description: "Pilot task 8"
+
+  "ansible__ansible-1a4644ff15355fd696ac5b9d074a566a80fe7ca3":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible-python311:multi-agent
+    timemachine_date: "2024-09-02"
+    description: "Pilot task 9"
+
+  "ansible__ansible-1b70260d5aa2f6c9782fd2b848e8d16566e50d85":
+    image: ghcr.io/thecontextlab/swebench-pro-ansible:multi-agent
+    timemachine_date: "2020-12-09"
+    description: "Pilot task 10 - verified working with current fix"
+
+# Task metadata
+tasks:
+  count: 96
+  source: 
+  pattern: ansible__ansible-*
+
+# Codebase Complexity Metadata
+codebase:
+  description: "Radically simple IT automation platform"
+  lines_of_code: 200000
+  architecture: monorepo
+  complexity: very_high
+  github_stars: 62000
+  contributors: 5000
+  first_commit: "2012-02"
+  key_challenges:
+    - Massive plugin ecosystem
+    - Complex module system with dynamic loading
+    - YAML DSL parsing and execution
+    - Cross-platform compatibility
+    - Jinja2 templating integration
+    - Python version compatibility (3.9 vs 3.11)
+    - pycrypto build dependencies
