@@ -140,8 +140,11 @@ The primary workflow. Accepts inputs:
 | `anthropic_api_key` | No | Override API key (falls back to secret) |
 | `openai_api_key` | No | Override API key (falls back to secret) |
 | `gemini_api_key` | No | Override API key (falls back to secret) |
+| `timeout_minutes` | No | Job timeout in minutes (default: 60) |
+| `agent_timeout_minutes` | No | Agent step timeout in minutes (default: 45) |
+| `max_turns` | No | Maximum agent turns, 0 = unlimited (default: 0) |
 
-Runs on `ubuntu-latest` with a 60-minute timeout (45 minutes for the agent step).
+Runs on `ubuntu-latest`. Job timeout and agent timeout are configurable via inputs (defaults: 60 and 45 minutes respectively). Concurrency is scoped per-actor per-repo to prevent duplicate runs.
 
 ### `regression-test.yml` — P2P Regression Testing
 
@@ -153,6 +156,26 @@ Five-phase pipeline:
 3. **Apply Patch**: Apply the agent's `changes.patch`
 4. **Run P2P Tests**: Execute pass-to-pass tests
 5. **Report**: Generate regression result
+
+### `validate-infrastructure.yml` — Infrastructure Validation
+
+A zero-cost workflow that validates Docker images, repo setup, and test baselines without running an AI agent. Useful for verifying infrastructure before launching expensive evaluation runs.
+
+Four-phase validation:
+1. **Image Pull**: Pull Docker image from GHCR, verify basic tools (git, bash)
+2. **Repo Setup**: Clone repo, apply `before_repo_set_cmd`, run `setup.sh`
+3. **F2P Pre-verification**: Confirm fail-to-pass tests fail (validates task correctness)
+4. **P2P Baseline**: Confirm pass-to-pass tests pass (validates infrastructure)
+
+Inputs: `repo` (dropdown), `task` (optional), `validation_type` (`all`/`image`/`setup`/`f2p`/`p2p`), `timeout_minutes`. Outputs a `validation_report.json` artifact with pass/fail/warn per phase.
+
+### `docker-build.yml` — Docker Image Build
+
+Builds and optionally pushes Docker images from `docker/Dockerfile.*` files. Supports all 22 Dockerfiles via a dropdown input.
+
+Inputs: `dockerfile` (dropdown), `push` (boolean, default false), `no_cache` (boolean), `platform` (`linux/amd64` or `linux/arm64`). Auto-derives the GHCR image name from the Dockerfile suffix. Verifies tools after build.
+
+A local helper script `docker/build.sh` provides the same functionality outside GitHub Actions.
 
 ## Container Filesystem Layout
 

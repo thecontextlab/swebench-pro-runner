@@ -226,7 +226,7 @@ for repo in datasets/*/; do
 done
 ```
 
-Does the total match 742? Do individual repo counts match the README table? If not, submit a PR fixing the README.
+Does the total match 731? Do individual repo counts match the README table? If not, submit a PR fixing the README.
 
 #### Easy: Validate all YAML files
 
@@ -330,8 +330,8 @@ As you work on larger contributions, keep cost in mind:
 | Run 1 task (Opus) | $1-$5 | Make sure you need Opus |
 | Run 10 tasks (Sonnet) | $2-$5 | Use `--dry-run` first |
 | Run 1 repo (Sonnet) | $15-$50 | Plan your batch, set `--delay 60` |
-| Run all 742 (Sonnet) | ~$250 | Discuss with maintainers first |
-| Run all 742 (Opus) | ~$2,000+ | Get explicit approval |
+| Run all 731 (Sonnet) | ~$250 | Discuss with maintainers first |
+| Run all 731 (Opus) | ~$2,000+ | Get explicit approval |
 | Best-of-3 all tasks | 3x above | Reserved for official benchmark runs |
 
 ---

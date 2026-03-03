@@ -1,6 +1,6 @@
 # SWE-bench Pro Runner
 
-An open-source evaluation platform for testing AI coding agents on real-world software engineering tasks. SWE-bench Pro Runner provides 742 curated tasks across 11 production repositories, with full orchestration tooling to launch evaluations, track results, and generate analytics reports.
+An open-source evaluation platform for testing AI coding agents on real-world software engineering tasks. SWE-bench Pro Runner provides 731 curated tasks across 11 production repositories, with full orchestration tooling to launch evaluations, track results, and generate analytics reports.
 
 The platform runs evaluations in Docker containers via GitHub Actions: an AI agent receives a task instruction and a failing test, then must fix the code so the test passes — while ensuring existing tests don't regress.
 
@@ -24,7 +24,7 @@ Before you begin, make sure you have:
 
 > **Every evaluation run costs real money.** Each task makes API calls to Claude, Codex, or Gemini. Understand the costs before running evaluations.
 
-| Model | Approx. Cost Per Task | Full Benchmark (742 tasks) |
+| Model | Approx. Cost Per Task | Full Benchmark (731 tasks) |
 |-------|----------------------|---------------------------|
 | `claude-haiku-4-5` | $0.05 – $0.15 | ~$75 |
 | `claude-sonnet-4-5` | $0.15 – $0.50 | ~$250 |
@@ -85,7 +85,9 @@ Before you begin, make sure you have:
 swebench-pro-runner/
 ├── .github/workflows/
 │   ├── swebench-eval.yml         # Main evaluation workflow
-│   └── regression-test.yml       # Pass-to-pass regression testing
+│   ├── regression-test.yml       # Pass-to-pass regression testing
+│   ├── validate-infrastructure.yml # Zero-cost infra validation (images, F2P, P2P)
+│   └── docker-build.yml          # Build and push Docker images
 ├── datasets/
 │   ├── common/
 │   │   ├── config_loader.py      # Task-specific configuration resolver
@@ -114,6 +116,9 @@ swebench-pro-runner/
 │       ├── generate_report.py    # Markdown + CSV reports
 │       ├── audit_artifacts.py    # Ground-truth verification parsing
 │       └── _utils.py             # Shared utilities
+├── docker/
+│   ├── Dockerfile.*              # 22 Dockerfiles for all repo variants
+│   └── build.sh                  # Local image build helper
 └── docs/
     ├── ARCHITECTURE.md           # Workflow pipeline and container execution
     ├── TASK-SCHEMA.md            # Task YAML format and test patterns
@@ -126,18 +131,18 @@ swebench-pro-runner/
 
 | Repository | Language | Tasks | Test Framework | Complexity |
 |------------|----------|------:|----------------|------------|
-| [ansible](https://github.com/ansible/ansible) | Python | 97 | pytest | Very High |
-| [openlibrary](https://github.com/internetarchive/openlibrary) | Python | 92 | pytest | High |
-| [flipt](https://github.com/flipt-io/flipt) | Go | 86 | go test | Medium |
-| [qutebrowser](https://github.com/qutebrowser/qutebrowser) | Python | 80 | pytest | High |
-| [teleport](https://github.com/gravitational/teleport) | Go | 77 | go test (custom) | Very High |
-| [webclients](https://github.com/protonmail/WebClients) | TypeScript | 66 | jest (workspace) | Very High |
-| [vuls](https://github.com/future-architect/vuls) | Go | 63 | go test | Medium |
-| [navidrome](https://github.com/navidrome/navidrome) | Go | 58 | go test | Medium |
-| [element-web](https://github.com/element-hq/element-web) | TypeScript | 57 | jest | High |
-| [NodeBB](https://github.com/NodeBB/NodeBB) | JavaScript | 45 | mocha | Medium |
-| [tutanota](https://github.com/tutao/tutanota) | TypeScript | 21 | custom | High |
-| **Total** | | **742** | | |
+| [ansible](https://github.com/ansible/ansible) | Python | 96 | pytest | Very High |
+| [openlibrary](https://github.com/internetarchive/openlibrary) | Python | 91 | pytest | High |
+| [flipt](https://github.com/flipt-io/flipt) | Go | 85 | go test | Medium |
+| [qutebrowser](https://github.com/qutebrowser/qutebrowser) | Python | 79 | pytest | High |
+| [teleport](https://github.com/gravitational/teleport) | Go | 76 | go test (custom) | Very High |
+| [webclients](https://github.com/protonmail/WebClients) | TypeScript | 65 | jest (workspace) | Very High |
+| [vuls](https://github.com/future-architect/vuls) | Go | 62 | go test | Medium |
+| [navidrome](https://github.com/navidrome/navidrome) | Go | 57 | go test | Medium |
+| [element-web](https://github.com/element-hq/element-web) | TypeScript | 56 | jest | High |
+| [NodeBB](https://github.com/NodeBB/NodeBB) | JavaScript | 44 | mocha | Medium |
+| [tutanota](https://github.com/tutao/tutanota) | TypeScript | 20 | custom | High |
+| **Total** | | **731** | | |
 
 ## Supported Agents
 

@@ -128,6 +128,7 @@ python3 monitor_runs.py --start-date 2026-02-21 --repo flipt --agent codex
 | `--repo` | No | — | Filter by repository |
 | `--watch` | No | — | Continuously poll until all complete |
 | `--interval` | No | `60` | Poll interval in seconds |
+| `--limit` | No | `200` | Max runs to fetch from API |
 
 ### `download_artifacts.py` — Artifact Downloader
 
@@ -155,6 +156,8 @@ python3 download_artifacts.py \
 | `--folder-prefix` | No | — | Prefix for downloaded folder names |
 | `--cache-file` | No | — | Cache GHA run list to avoid repeated API calls |
 | `--limit` | No | `500` | Max runs to fetch from API |
+| `--status` | No | `completed` | Run status filter (e.g., `completed`, `in_progress`) |
+| `--conclusion` | No | `success` | Run conclusion filter (e.g., `success`, `failure`) |
 
 ### `validate_artifacts.py` — Artifact Validator
 
@@ -201,6 +204,7 @@ python3 extract_failing_tasks.py --artifact-dir ./eval-claude \
 | `--artifact-dir` | Yes | — | Directory to scan |
 | `--format` | No | `launch` | `launch` (pipe-delimited) or `csv` |
 | `--rate-limited-only` | No | — | Only include rate-limited failures |
+| `--include-all` | No | — | Include all failing tasks (ignore rate-limit filter) |
 | `--exclude-broken` | No | — | Hash parts of broken tasks to skip |
 | `--output` | No | stdout | Output file path |
 

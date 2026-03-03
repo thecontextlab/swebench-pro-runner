@@ -35,10 +35,20 @@ Some repositories require multiple images for different task groups:
 | Repository | Variant | Image | Purpose |
 |------------|---------|-------|---------|
 | ansible | Python 3.9 | `swebench-pro-ansible:multi-agent` | Legacy tasks (pre-2022) |
-| ansible | Python 3.11 | `swebench-pro-ansible-python311:multi-agent` | Modern tasks |
-| openlibrary | Python 3.9 | `swebench-pro-openlibrary:multi-agent` | Legacy tasks |
+| ansible | Python 3.9 (alt) | `swebench-pro-ansible-python39:multi-agent` | Alternate Python 3.9 build |
+| openlibrary | Python 3.9 | `swebench-pro-openlibrary-python39:multi-agent` | Legacy tasks |
+| openlibrary | Python 3.9 (fixed) | `swebench-pro-openlibrary-python39-fixed:multi-agent` | Patched legacy build |
 | openlibrary | Python 3.11 | `swebench-pro-openlibrary-python311:multi-agent` | Modern tasks |
+| openlibrary | Python 3.11 (fixed) | `swebench-pro-openlibrary-python311-fixed:multi-agent` | Patched modern build |
 | openlibrary | Python 3.12 | `swebench-pro-openlibrary-python312:multi-agent` | Latest tasks |
+| qutebrowser | Python 3.10 | `swebench-pro-qutebrowser:multi-agent` | Default |
+| qutebrowser | Python 3.11 | `swebench-pro-qutebrowser-python311:multi-agent` | Modern tasks |
+| tutanota | Base | `swebench-pro-tutanota:multi-agent` | Default |
+| tutanota | Node 18 | `swebench-pro-tutanota-node18:multi-agent` | Legacy Node.js 18 tasks |
+| tutanota | Node 20 | `swebench-pro-tutanota-node20:multi-agent` | Node.js 20 tasks |
+| webclients | Default | `swebench-pro-webclients:multi-agent` | Default |
+| webclients | Karma | `swebench-pro-webclients-karma:multi-agent` | Karma test runner tasks |
+| webclients | Node 22 | `swebench-pro-webclients-node22:multi-agent` | Node.js 22 tasks |
 
 Task-to-image routing is handled by `config_loader.py` using patterns defined in each repository's `config.yaml`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the configuration hierarchy.
 
@@ -103,17 +113,58 @@ docker/
 ├── Dockerfile.flipt
 ├── Dockerfile.navidrome-multi-agent
 ├── Dockerfile.nodebb-multi-agent
-├── Dockerfile.openlibrary-python311
 ├── Dockerfile.openlibrary-python39
+├── Dockerfile.openlibrary-python39-fixed
+├── Dockerfile.openlibrary-python311
+├── Dockerfile.openlibrary-python311-fixed
+├── Dockerfile.openlibrary-python312
 ├── Dockerfile.qutebrowser-multi-agent
+├── Dockerfile.qutebrowser-python311-multi-agent
 ├── Dockerfile.teleport
+├── Dockerfile.tutanota
 ├── Dockerfile.tutanota-multi-agent
+├── Dockerfile.tutanota-node18
+├── Dockerfile.tutanota-node20
 ├── Dockerfile.vuls-multi-agent
 ├── Dockerfile.webclients
-└── Dockerfile.webclients-node22
+├── Dockerfile.webclients-karma
+├── Dockerfile.webclients-node22
+└── build.sh                          # Local build helper script
 ```
 
 ## Building Images
+
+### Using the Build Script
+
+The `docker/build.sh` helper script simplifies building and pushing images:
+
+```bash
+# Build one image
+./docker/build.sh vuls-multi-agent
+
+# Build and push to GHCR
+./docker/build.sh --push flipt
+
+# Build all images
+./docker/build.sh --all
+
+# Fresh rebuild (no Docker cache)
+./docker/build.sh --no-cache teleport
+
+# List all available Dockerfiles and their image names
+./docker/build.sh --list
+```
+
+### Using the GitHub Actions Workflow
+
+The `docker-build.yml` workflow builds images in CI:
+
+1. Go to **Actions → Build Docker Image**
+2. Select the Dockerfile from the dropdown
+3. Optionally enable **push** to publish to GHCR
+4. Optionally enable **no_cache** for fresh rebuilds
+
+The workflow auto-derives the GHCR image name from the Dockerfile suffix, verifies tools after build, and generates a summary report.
 
 ### Dockerfile Structure
 

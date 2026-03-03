@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SWE-bench Pro Runner is an evaluation platform for testing AI coding agents (Claude, Codex, Gemini) on 742 real-world software engineering tasks across 11 production repositories. Evaluations run in Docker containers via GitHub Actions: an agent receives a task instruction + failing test, fixes the code, then verification checks that fail-to-pass (F2P) tests now pass and pass-to-pass (P2P) tests don't regress.
+SWE-bench Pro Runner is an evaluation platform for testing AI coding agents (Claude, Codex, Gemini) on 731 real-world software engineering tasks across 11 production repositories. Evaluations run in Docker containers via GitHub Actions: an agent receives a task instruction + failing test, fixes the code, then verification checks that fail-to-pass (F2P) tests now pass and pass-to-pass (P2P) tests don't regress.
 
 Built on the [SWE-bench Pro](https://arxiv.org/abs/2509.16941) benchmark by Scale AI. The public dataset is at [ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro) on Hugging Face, with source code at [scaleapi/SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os).
 
