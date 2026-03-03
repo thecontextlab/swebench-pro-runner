@@ -1,0 +1,197 @@
+name: Build Docker Image
+
+run-name: "docker build | ${{ inputs.dockerfile }} | ${{ inputs.push && 'push' || 'build-only' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dockerfile:
+        description: 'Dockerfile to build (suffix after "Dockerfile.")'
+        required: true
+        type: choice
+        options:
+          - ansible-multi-agent
+          - ansible-python39-multi-agent
+          - element-web-multi-agent
+          - flipt
+          - navidrome-multi-agent
+          - nodebb-multi-agent
+          - openlibrary-python39
+          - openlibrary-python39-fixed
+          - openlibrary-python311
+          - openlibrary-python311-fixed
+          - openlibrary-python312
+          - qutebrowser-multi-agent
+          - qutebrowser-python311-multi-agent
+          - teleport
+          - tutanota
+          - tutanota-multi-agent
+          - tutanota-node18
+          - tutanota-node20
+          - vuls-multi-agent
+          - webclients
+          - webclients-karma
+          - webclients-node22
+      push:
+        description: 'Push image to GHCR after building'
+        required: false
+        default: false
+        type: boolean
+      no_cache:
+        description: 'Build with --no-cache (fresh rebuild)'
+        required: false
+        default: false
+        type: boolean
+      platform:
+        description: 'Target platform'
+        required: false
+        default: 'linux/amd64'
+        type: choice
+        options:
+          - linux/amd64
+          - linux/arm64
+
+concurrency:
+  group: docker-build-${{ github.actor }}-${{ inputs.dockerfile }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_ORG: thecontextlab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image name
+        id: meta
+        run: |
+          SUFFIX="${{ inputs.dockerfile }}"
+          DOCKERFILE="docker/Dockerfile.${SUFFIX}"
+
+          if [ ! -f "$DOCKERFILE" ]; then
+            echo "ERROR: Dockerfile not found: $DOCKERFILE"
+            ls docker/Dockerfile.* 2>/dev/null || echo "No Dockerfiles found in docker/"
+            exit 1
+          fi
+
+          # Map Dockerfile suffix to image name
+          # Convention: strip -multi-agent suffix for the image name, use multi-agent as tag
+          IMAGE_NAME=$(echo "$SUFFIX" | sed 's/-multi-agent$//')
+
+          # Special case: nodebb -> NodeBB
+          if [ "$IMAGE_NAME" = "nodebb" ]; then
+            IMAGE_NAME="NodeBB"
+          fi
+
+          FULL_IMAGE="${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/swebench-pro-${IMAGE_NAME}:multi-agent"
+
+          echo "dockerfile=$DOCKERFILE" >> $GITHUB_OUTPUT
+          echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+          echo "image_name=swebench-pro-${IMAGE_NAME}" >> $GITHUB_OUTPUT
+
+          echo "Dockerfile: $DOCKERFILE"
+          echo "Image: $FULL_IMAGE"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        id: build
+        run: |
+          BUILD_ARGS="--file ${{ steps.meta.outputs.dockerfile }}"
+          BUILD_ARGS="$BUILD_ARGS --tag ${{ steps.meta.outputs.image }}"
+          BUILD_ARGS="$BUILD_ARGS --platform ${{ inputs.platform }}"
+
+          if [ "${{ inputs.no_cache }}" = "true" ]; then
+            BUILD_ARGS="$BUILD_ARGS --no-cache"
+          fi
+
+          # Build context is the repo root (some Dockerfiles may COPY files)
+          echo "Building: docker build $BUILD_ARGS ."
+          docker build $BUILD_ARGS .
+
+          echo "Build complete: ${{ steps.meta.outputs.image }}"
+
+      - name: Verify image
+        run: |
+          IMAGE="${{ steps.meta.outputs.image }}"
+          echo "Verifying image: $IMAGE"
+
+          # Check image exists locally
+          docker image inspect "$IMAGE" > /dev/null 2>&1 || {
+            echo "ERROR: Image not found after build"
+            exit 1
+          }
+
+          # Show image size
+          SIZE=$(docker image inspect "$IMAGE" --format '{{.Size}}' | numfmt --to=iec-i --suffix=B)
+          echo "Image size: $SIZE"
+
+          # Verify basic tools
+          docker run --rm "$IMAGE" bash -c '
+            echo "=== Tool Verification ==="
+            ERRORS=0
+            for cmd in git bash; do
+              if which $cmd > /dev/null 2>&1; then
+                echo "  OK: $cmd ($(which $cmd))"
+              else
+                echo "  MISSING: $cmd"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+
+            # Check for agent CLIs (optional — not all images have them)
+            for cmd in claude codex gemini; do
+              if which $cmd > /dev/null 2>&1; then
+                echo "  OK: $cmd ($(which $cmd))"
+              else
+                echo "  INFO: $cmd not found (may be expected for base images)"
+              fi
+            done
+
+            exit $ERRORS
+          '
+
+      - name: Push image
+        if: inputs.push
+        run: |
+          echo "Pushing: ${{ steps.meta.outputs.image }}"
+          docker push "${{ steps.meta.outputs.image }}"
+          echo "Push complete"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "# Docker Build Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Dockerfile** | \`${{ steps.meta.outputs.dockerfile }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.meta.outputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platform** | ${{ inputs.platform }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **No Cache** | ${{ inputs.no_cache }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Pushed** | ${{ inputs.push }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ inputs.push }}" = "true" ]; then
+            echo "> Image pushed to \`${{ steps.meta.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "> Build-only — image was **not** pushed. Re-run with push=true to publish." >> $GITHUB_STEP_SUMMARY
+          fi
