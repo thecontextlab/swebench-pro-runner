@@ -1,0 +1,61 @@
+# SWE-bench Pro Runner - Docker image for webclients (Karma tests)
+FROM ghcr.io/thecontextlab/swebench-pro-webclients:node22-cli
+
+# Install puppeteer + Chromium for @proton/key-transparency Karma tests.
+# Only task 815695401137dac2975400fc610149a16db8214b needs this.
+# Kept in a separate image to avoid adding ~300MB to the main image.
+
+# Install system dependencies for headless Chrome
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2 libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install puppeteer + playwright with all dependencies into a temp dir,
+# then copy NEW packages to testbed (skip existing to avoid breaking Yarn deps).
+# Puppeteer: provides Chrome binary at /root/.cache/puppeteer/
+# Playwright: historical karma.conf.js uses `import { chromium } from 'playwright'`
+RUN cd /tmp && mkdir pup && cd pup && echo '{}' > package.json && \
+    npm install puppeteer@22.0.0 playwright@1.45.0 && \
+    echo "Copying new packages to /testbed/node_modules..." && \
+    cd node_modules && \
+    for pkg in */; do \
+      if [ ! -d "/testbed/node_modules/$pkg" ]; then \
+        cp -r "$pkg" "/testbed/node_modules/$pkg"; \
+        echo "  + $pkg"; \
+      fi; \
+    done && \
+    for scope in @*/; do \
+      if [ -d "$scope" ]; then \
+        mkdir -p "/testbed/node_modules/$scope"; \
+        for pkg in "$scope"*/; do \
+          if [ ! -d "/testbed/node_modules/$pkg" ]; then \
+            cp -r "$pkg" "/testbed/node_modules/$pkg"; \
+            echo "  + $pkg"; \
+          fi; \
+        done; \
+      fi; \
+    done && \
+    echo "Puppeteer + Playwright packages copied" && \
+    cd / && rm -rf /tmp/pup
+
+# Download Playwright's Chromium browser binary
+RUN cd /testbed && npx playwright install chromium
+
+# Verify both puppeteer and playwright Chrome paths exist
+RUN cd /testbed && node -e " \
+    const puppeteer = require('puppeteer'); \
+    const pPath = puppeteer.executablePath(); \
+    console.log('Puppeteer Chrome:', pPath); \
+    const { chromium } = require('playwright'); \
+    const plPath = chromium.executablePath(); \
+    console.log('Playwright Chrome:', plPath); \
+    const fs = require('fs'); \
+    [['Puppeteer', pPath], ['Playwright', plPath]].forEach(([name, p]) => { \
+        if (fs.existsSync(p)) console.log(name, 'Chrome binary found'); \
+        else { console.log(name, 'Chrome NOT found at', p); process.exit(1); } \
+    }); \
+    "
+
+WORKDIR /testbed

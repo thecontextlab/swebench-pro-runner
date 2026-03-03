@@ -1,6 +1,6 @@
 # Task Schema Reference
 
-Every SWE-bench Pro task is defined by three files that together specify the problem, environment, and verification criteria.
+Task definitions in this repository are derived from the [SWE-bench Pro](https://arxiv.org/abs/2509.16941) public dataset by Scale AI ([ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro)). Each dataset entry is expanded into three files that together specify the problem, environment, and verification criteria.
 
 ## File Naming Convention
 

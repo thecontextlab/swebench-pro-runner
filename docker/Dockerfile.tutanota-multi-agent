@@ -1,0 +1,11 @@
+# SWE-bench Pro Runner - Docker image for tutanota (multi-agent, Node 18)
+FROM ghcr.io/thecontextlab/swebench-pro-tutanota:node18-cli
+
+# Install Codex CLI and Gemini CLI (Claude already installed)
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+WORKDIR /testbed

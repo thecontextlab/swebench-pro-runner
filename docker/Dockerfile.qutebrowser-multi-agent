@@ -1,0 +1,99 @@
+# SWE-bench Pro Runner - Docker image for qutebrowser (multi-agent, Python 3.9)
+# Pinned to python:3.9.18-slim for setuptools 58.1.0 (matching SWE-bench base images)
+FROM python:3.9.18-slim
+
+# System dependencies from SWE-bench v2ef375ac base Dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    bash \
+    python3-dev \
+    python-is-python3 \
+    build-essential \
+    libglib2.0-0 \
+    libgl1 \
+    libegl1 \
+    libgl1-mesa-glx \
+    libegl1-mesa \
+    libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libdbus-1-3 \
+    dbus-x11 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxi6 \
+    libxrandr2 \
+    libxfixes3 \
+    libxcursor1 \
+    libxrender1 \
+    libxext6 \
+    libxss1 \
+    libxtst6 \
+    libxslt1.1 \
+    libxcb1 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-xinerama0 \
+    libxcb-xfixes0 \
+    libxcb-shape0 \
+    libxcb-cursor0 \
+    xvfb \
+    x11-utils \
+    libnss3 \
+    libnspr4 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libgtk-3-0 \
+    libfontconfig1 \
+    fonts-liberation2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyQt5 and test dependencies
+RUN pip3 install --no-cache-dir \
+    PyQt5==5.15.6 PyQtWebEngine==5.15.5 \
+    jinja2 MarkupSafe \
+    pytest==7.1.1 pytest-qt==4.0.2 pytest-mock==3.7.0 \
+    pytest-benchmark==3.4.1 pytest-bdd==4.1.0 pytest-xvfb==2.0.0 \
+    pytest-instafail==0.4.2 pytest-repeat==0.9.1 pytest-rerunfailures==10.2 \
+    pytest-xdist==2.5.0 pytest-forked==1.4.0 pytest-cov==3.0.0 \
+    pytest-icdiff==0.5 \
+    hypothesis==6.40.0 attrs==21.4.0 \
+    coverage==6.3.2 beautifulsoup4==4.10.0 \
+    Flask==2.1.0 cheroot==8.6.0 Werkzeug==2.1.0 \
+    hunter==3.4.3 manhole==1.8.0 vulture==2.3 \
+    PyVirtualDisplay==3.0 requests==2.27.1 \
+    tldextract==3.2.0 icdiff==2.0.4 pprintpp==0.4.0 \
+    Mako==1.2.0 Pygments==2.11.2 \
+    2>&1 | tail -3
+
+# Install Node.js 20.x (required for CLI tools)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
+
+# Install multi-agent CLI tools
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+# Verify all tools
+RUN echo "=== Verifying ===" && \
+    python3 --version && \
+    python3 -c "import PyQt5; print('PyQt5 OK')" && \
+    python3 -c "import pytest; print('pytest OK')" && \
+    pip3 show setuptools | grep Version && \
+    which claude && which codex && which gemini && \
+    echo "All tools verified"
+
+WORKDIR /testbed
+ENTRYPOINT ["/bin/bash"]

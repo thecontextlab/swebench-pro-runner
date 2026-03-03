@@ -91,6 +91,28 @@ In GitHub Actions, `GITHUB_TOKEN` is automatically available.
 docker pull ghcr.io/thecontextlab/swebench-pro-vuls:multi-agent
 ```
 
+## Dockerfiles
+
+All Dockerfiles are in the `docker/` directory at the repository root. Each file follows the naming convention `Dockerfile.{repo-variant}`:
+
+```
+docker/
+├── Dockerfile.ansible-multi-agent
+├── Dockerfile.ansible-python39-multi-agent
+├── Dockerfile.element-web-multi-agent
+├── Dockerfile.flipt
+├── Dockerfile.navidrome-multi-agent
+├── Dockerfile.nodebb-multi-agent
+├── Dockerfile.openlibrary-python311
+├── Dockerfile.openlibrary-python39
+├── Dockerfile.qutebrowser-multi-agent
+├── Dockerfile.teleport
+├── Dockerfile.tutanota-multi-agent
+├── Dockerfile.vuls-multi-agent
+├── Dockerfile.webclients
+└── Dockerfile.webclients-node22
+```
+
 ## Building Images
 
 ### Dockerfile Structure
@@ -163,7 +185,7 @@ Start from the closest existing image and adapt:
 
 ```bash
 # Copy an existing Dockerfile as starting point
-cp datasets/vuls/Dockerfile datasets/newrepo/Dockerfile
+cp docker/Dockerfile.vuls-multi-agent docker/Dockerfile.newrepo-multi-agent
 ```
 
 ### Step 3: Pre-install Dependencies
@@ -182,7 +204,7 @@ RUN git clone https://github.com/org/repo.git /testbed && \
 ```bash
 # Build the image
 docker build -t ghcr.io/thecontextlab/swebench-pro-newrepo:multi-agent \
-  -f datasets/newrepo/Dockerfile .
+  -f docker/Dockerfile.newrepo-multi-agent .
 
 # Test it works
 docker run --rm -it ghcr.io/thecontextlab/swebench-pro-newrepo:multi-agent bash
@@ -257,7 +279,7 @@ for repo in vuls flipt teleport navidrome ansible openlibrary qutebrowser \
             element-web webclients NodeBB tutanota; do
   docker build --no-cache \
     -t ghcr.io/thecontextlab/swebench-pro-${repo}:multi-agent \
-    -f datasets/${repo}/Dockerfile .
+    -f docker/Dockerfile.${repo}-multi-agent .
   docker push ghcr.io/thecontextlab/swebench-pro-${repo}:multi-agent
 done
 ```

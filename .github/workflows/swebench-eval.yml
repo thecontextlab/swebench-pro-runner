@@ -77,11 +77,30 @@ on:
         description: 'Gemini API key (optional, falls back to GEMINI_API_KEY secret)'
         required: false
         type: string
+      timeout_minutes:
+        description: 'Job timeout in minutes (default: 60, increase for long-running tasks)'
+        required: false
+        default: 60
+        type: number
+      agent_timeout_minutes:
+        description: 'Agent step timeout in minutes (default: 45, increase for complex tasks)'
+        required: false
+        default: 45
+        type: number
+      max_turns:
+        description: 'Max agent turns (0 = unlimited, default: 0)'
+        required: false
+        default: 0
+        type: number
+
+concurrency:
+  group: swebench-eval-${{ github.actor }}-${{ inputs.repo }}
+  cancel-in-progress: false
 
 jobs:
   execute:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) || 60 }}
 
     steps:
       - name: Checkout eval-runner
@@ -229,10 +248,12 @@ jobs:
         id: apikey
         run: |
           # Resolve API key based on selected agent
+          # Keys from workflow inputs are masked to prevent log exposure
           case "${{ inputs.agent }}" in
             claude)
               if [ -n "${{ inputs.anthropic_api_key }}" ]; then
-                echo "Using Anthropic API key from workflow input"
+                echo "::add-mask::${{ inputs.anthropic_api_key }}"
+                echo "Using Anthropic API key from workflow input (masked)"
                 echo "anthropic_key=${{ inputs.anthropic_api_key }}" >> $GITHUB_OUTPUT
               else
                 echo "Using Anthropic API key from repository secret"
@@ -241,7 +262,8 @@ jobs:
               ;;
             codex)
               if [ -n "${{ inputs.openai_api_key }}" ]; then
-                echo "Using OpenAI API key from workflow input"
+                echo "::add-mask::${{ inputs.openai_api_key }}"
+                echo "Using OpenAI API key from workflow input (masked)"
                 echo "openai_key=${{ inputs.openai_api_key }}" >> $GITHUB_OUTPUT
               else
                 echo "Using OpenAI API key from repository secret"
@@ -250,7 +272,8 @@ jobs:
               ;;
             gemini)
               if [ -n "${{ inputs.gemini_api_key }}" ]; then
-                echo "Using Gemini API key from workflow input"
+                echo "::add-mask::${{ inputs.gemini_api_key }}"
+                echo "Using Gemini API key from workflow input (masked)"
                 echo "gemini_key=${{ inputs.gemini_api_key }}" >> $GITHUB_OUTPUT
               else
                 echo "Using Gemini API key from repository secret"
@@ -261,7 +284,7 @@ jobs:
 
       - name: Run task with AI Agent
         id: run
-        timeout-minutes: 45
+        timeout-minutes: ${{ fromJSON(inputs.agent_timeout_minutes) || 45 }}
         env:
           MCP_CONFIG: ${{ steps.config.outputs.mcp_config }}
         run: |
@@ -345,6 +368,7 @@ jobs:
             -e MCP_CONFIG='${{ steps.config.outputs.mcp_config }}' \
             -e MCP_URL="${{ steps.config.outputs.mcp_url }}" \
             -e MCP_TOKEN="${{ secrets.MCP_TOKEN }}" \
+            -e MAX_TURNS="${{ inputs.max_turns }}" \
             -e CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT=1 \
             ${{ steps.config.outputs.ar_image }} \
             -c '

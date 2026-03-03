@@ -1,0 +1,54 @@
+# SWE-bench Pro Runner - Docker image for openlibrary (Python 3.9, fixed deps)
+FROM ghcr.io/thecontextlab/swebench-pro-openlibrary-python39:cli
+
+# Install all required Python dependencies that tasks commonly need
+RUN cd /testbed && \
+    pip install --upgrade pip setuptools wheel && \
+    pip install \
+        pytest==7.4.0 \
+        pytest-cov \
+        pytest-mock \
+        web.py \
+        psycopg2-binary \
+        pyyaml \
+        babel \
+        beautifulsoup4 \
+        internetarchive \
+        isbnlib \
+        lxml \
+        mypy \
+        pillow \
+        pymarc \
+        python-memcached \
+        pyyaml \
+        requests \
+        safety \
+        sentry-sdk \
+        simplejson \
+        supervisor \
+        pytz \
+        python-dateutil \
+        jsonschema \
+        elasticsearch \
+        redis \
+        msgpack \
+        olefile \
+        rdflib \
+        pyopenssl \
+        iso-639 \
+        markdown \
+        httpx \
+        evdev && \
+    # Ensure pytest is in PATH
+    which pytest && \
+    pytest --version && \
+    python3 -c "import web; print('web.py installed successfully')"
+
+# Set working directory
+WORKDIR /testbed
+
+# Ensure git is configured to avoid dubious ownership issues
+RUN git config --global --add safe.directory /testbed
+
+# Pre-check that critical packages are available
+RUN python3 -c "import pytest; import web; import distutils; print('All critical packages verified')"

@@ -4,18 +4,56 @@ An open-source evaluation platform for testing AI coding agents on real-world so
 
 The platform runs evaluations in Docker containers via GitHub Actions: an AI agent receives a task instruction and a failing test, then must fix the code so the test passes — while ensuring existing tests don't regress.
 
+> **Built on [SWE-bench Pro](https://scale.com/leaderboard/swe_bench_pro_public)** — the long-horizon software engineering benchmark by [Scale AI](https://scale.com). This runner uses the public dataset ([ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro)) containing 731 task instances across 11 open-source repositories. See [Dataset & Attribution](#dataset--attribution) for full details.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+1. A **GitHub account** — [sign up](https://github.com/signup) if you don't have one
+2. **GitHub CLI (`gh`)** — install from [cli.github.com](https://cli.github.com), then run `gh auth login`
+3. **An API key** for at least one AI provider:
+   - [Anthropic](https://console.anthropic.com/) (for Claude agents)
+   - [OpenAI](https://platform.openai.com/) (for Codex agents)
+   - [Google AI Studio](https://aistudio.google.com/) (for Gemini agents)
+4. **Python 3.9+** with `pyyaml` installed (`pip install pyyaml`)
+
+> **New to these tools?** See [docs/ONBOARDING.md](docs/ONBOARDING.md) for a step-by-step learning path, and [docs/GLOSSARY.md](docs/GLOSSARY.md) for definitions of all terms used in this project.
+
+## Cost Warning
+
+> **Every evaluation run costs real money.** Each task makes API calls to Claude, Codex, or Gemini. Understand the costs before running evaluations.
+
+| Model | Approx. Cost Per Task | Full Benchmark (742 tasks) |
+|-------|----------------------|---------------------------|
+| `claude-haiku-4-5` | $0.05 – $0.15 | ~$75 |
+| `claude-sonnet-4-5` | $0.15 – $0.50 | ~$250 |
+| `claude-opus-4-6` | $1.00 – $5.00 | ~$2,000+ |
+| `gpt-4o-mini` | $0.05 – $0.15 | ~$75 |
+| `gpt-4o` | $0.30 – $1.00 | ~$500 |
+| `gpt-5.3-codex` | $0.50 – $2.00 | ~$1,000+ |
+| `gemini-2.0-flash-exp` | $0.05 – $0.15 | ~$75 |
+| `gemini-1.5-pro` | $0.20 – $0.80 | ~$400 |
+
+**Safety tips:**
+- Start with a **single task** before running batches
+- Use `--dry-run` with `launch_tasks.py` to preview what would be launched
+- Start with cheaper models (Haiku, GPT-4o-mini, Gemini Flash) while learning
+- Set spending limits on your API provider's dashboard
+- See [Cost Controls](#cost-controls) for more details
+
 ## Quick Start
 
-1. **Fork this repository** to your GitHub account.
+1. **Fork this repository** to your GitHub account (click the "Fork" button in the top-right corner of the GitHub page).
 
-2. **Set up secrets** in your fork's Settings → Secrets → Actions:
+2. **Set up secrets** in your fork: go to Settings → Secrets and variables → Actions → "New repository secret". Add the API key(s) for the agent(s) you plan to use:
    ```
    ANTHROPIC_API_KEY    # For Claude agents
    OPENAI_API_KEY       # For Codex agents
    GEMINI_API_KEY       # For Gemini agents
    ```
 
-3. **Run your first evaluation:**
+3. **Run your first evaluation** (a single task — costs ~$0.15-$0.50):
    ```bash
    gh workflow run swebench-eval.yml \
      -f repo=vuls \
@@ -25,15 +63,21 @@ The platform runs evaluations in Docker containers via GitHub Actions: an AI age
      -f enable_mcp=false
    ```
 
-4. **Monitor the run:**
+4. **Monitor the run** (takes 5-45 minutes depending on the task):
    ```bash
    gh run list --workflow=swebench-eval.yml --limit=5
    ```
 
-5. **Download results:**
+5. **Download results** (replace `<run-id>` with the ID from step 4):
    ```bash
    gh run download <run-id> --name=swebench-result-*
    ```
+
+6. **Check the result** — open `result.json` and look for:
+   - `"resolved": true` — the agent fixed the bug
+   - `"f2p_resolved": true` — fail-to-pass tests now pass
+   - `"p2p_no_regression": true` — existing tests still pass
+   - `"total_cost_usd"` — how much this run cost
 
 ## Repository Structure
 
@@ -146,15 +190,81 @@ The platform supports [Model Context Protocol (MCP)](https://modelcontextprotoco
 
 This enables controlled experiments comparing agent performance with and without access to external code intelligence tools.
 
+## Cost Controls
+
+The platform has several guardrails, but **cost management is ultimately your responsibility**:
+
+**Built-in protections:**
+- Workflow timeout: 60 minutes per task (agent step: 45 minutes) — runaway tasks get killed
+- `workflow_dispatch` only — evaluations are never triggered automatically by pushes or PRs
+- `--dry-run` mode in `launch_tasks.py` — preview before committing real money
+- `--delay` between launches — default 5 seconds, increase for large batches
+- Cost tracking in `result.json` — every run reports `total_cost_usd`
+
+**What you should do:**
+- Set billing alerts and spending limits on your [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google AI](https://aistudio.google.com/) dashboard
+- Always use `--dry-run` first when using `launch_tasks.py`
+- Start with one task, then small batches, before running hundreds
+- Use cheaper models while developing and debugging
+- Monitor runs with `gh run list` and cancel stuck ones with `gh run cancel <run-id>`
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
+| [ONBOARDING.md](docs/ONBOARDING.md) | Learning path for new contributors and their AI coding agents |
+| [GLOSSARY.md](docs/GLOSSARY.md) | Definitions of all domain terms (F2P, P2P, MCP, tokens, etc.) |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Workflow pipeline, container execution, multi-agent, MCP integration |
 | [TASK-SCHEMA.md](docs/TASK-SCHEMA.md) | Task YAML schema, setup scripts, test execution patterns |
 | [DOCKER-IMAGES.md](docs/DOCKER-IMAGES.md) | Image catalog, build process, adding new repositories |
 | [EVAL-ORCHESTRATION.md](docs/EVAL-ORCHESTRATION.md) | Full lifecycle: launch → monitor → download → validate → report |
 | [ANALYTICS.md](docs/ANALYTICS.md) | result.json schema, metrics extraction, cost models |
+
+## Dataset & Attribution
+
+### SWE-bench Pro
+
+The tasks in this repository are derived from the **SWE-bench Pro** benchmark, created by [Scale AI](https://scale.com). SWE-bench Pro is a large-scale benchmark of 1,865 long-horizon software engineering problems sourced from 41 actively maintained repositories. This runner uses the **public subset** of 731 instances from 11 open-source repositories.
+
+- **Dataset**: [ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro) on Hugging Face
+- **Source code**: [scaleapi/SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os) on GitHub
+- **Leaderboard**: [SWE-bench Pro Public Leaderboard](https://scale.com/leaderboard/swe_bench_pro_public)
+- **Paper**: [arXiv:2509.16941](https://arxiv.org/abs/2509.16941)
+
+#### Loading the dataset
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("ScaleAI/SWE-bench_Pro")
+print(dataset["test"][0])  # 731 instances
+```
+
+#### Citation
+
+If you use this evaluation platform or the underlying dataset, please cite the SWE-bench Pro paper:
+
+```bibtex
+@article{deng2025swebenchpro,
+  title={SWE-Bench Pro: Can AI Agents Solve Long-Horizon Software Engineering Tasks?},
+  author={Xiang Deng and Jeff Da and Edwin Pan and Yannis Yiming He and Charles Ide and Kanak Garg and Niklas Lauffer and Andrew Park and Nitin Pasari and Chetan Rane and Karmini Sampath and Maya Krishnan and Srivatsa Kundurthy and Sean Hendryx and Zifan Wang and Vijay Bharadwaj and Jeff Holm and Raja Aluri and Chen Bo Calvin Zhang and Noah Jacobson and Bing Liu and Brad Kenstler},
+  journal={arXiv preprint arXiv:2509.16941},
+  year={2025}
+}
+```
+
+### SWE-bench
+
+SWE-bench Pro builds upon the original SWE-bench benchmark. If relevant, please also cite:
+
+```bibtex
+@inproceedings{jimenez2024swebench,
+  title={SWE-bench: Can Language Models Resolve Real-World GitHub Issues?},
+  author={Carlos E. Jimenez and John Yang and Alexander Wettig and Shunyu Yao and Kexin Pei and Ofir Press and Karthik Narasimhan},
+  booktitle={The Twelfth International Conference on Learning Representations},
+  year={2024}
+}
+```
 
 ## Contributing
 

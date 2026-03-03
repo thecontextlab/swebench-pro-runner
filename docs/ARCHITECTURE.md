@@ -1,5 +1,7 @@
 # Architecture
 
+This platform is built on the [SWE-bench Pro](https://arxiv.org/abs/2509.16941) benchmark by Scale AI. Task definitions are derived from the public dataset ([ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro)).
+
 ## System Overview
 
 ```

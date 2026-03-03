@@ -1,0 +1,31 @@
+# SWE-bench Pro Runner - Docker image for ansible (multi-agent, Python 3.11)
+FROM ghcr.io/thecontextlab/swebench-pro-ansible-python311:latest
+
+# Install Node.js 20.x (required for CLI tools)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
+
+# Install multi-agent CLI tools
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+# Verify all CLI tools
+RUN echo "=== Verifying CLI tools ===" && \
+    which claude && echo "✓ Claude CLI" || echo "✗ Claude CLI missing" && \
+    which codex && echo "✓ Codex CLI" || echo "✗ Codex CLI missing" && \
+    which gemini && echo "✓ Gemini CLI" || echo "✗ Gemini CLI missing"
+
+# Install Python dependencies for adapter
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests pyyaml 2>/dev/null || \
+    pip3 install --no-cache-dir requests pyyaml
+
+WORKDIR /testbed

@@ -1,0 +1,44 @@
+# SWE-bench Pro Runner - Docker image for webclients
+# Includes multi-agent CLI tools for A/B testing
+FROM ghcr.io/thecontextlab/swebench-pro-webclients:latest
+
+# Install Node.js 20.x and npm (required for CLI tools, especially Gemini which needs Node 20+)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
+
+# Install multi-agent CLI tools (CRITICAL for A/B testing)
+# Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+# OpenAI Codex CLI
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+# Google Gemini CLI
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+# Verify all CLI tools are installed
+RUN echo "=== Verifying CLI tools ===" && \
+    which claude && echo "✓ Claude CLI found at $(which claude)" || echo "✗ Claude CLI missing" && \
+    which codex && echo "✓ Codex CLI found at $(which codex)" || echo "✗ Codex CLI missing" && \
+    which gemini && echo "✓ Gemini CLI found at $(which gemini)" || echo "✗ Gemini CLI missing"
+
+# Install Python dependencies for adapter if needed
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests \
+    google-cloud-storage \
+    pyyaml
+
+# Set working directory
+WORKDIR /testbed
+
+# Final verification
+RUN echo "=== Final CLI tools check ===" && \
+    claude --version 2>/dev/null || echo "Claude version check" && \
+    codex --version 2>/dev/null || echo "Codex version check" && \
+    gemini --version 2>/dev/null || echo "Gemini version check" && \
+    echo "=== Image ready for multi-agent evaluation ==="

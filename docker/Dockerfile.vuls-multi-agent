@@ -1,0 +1,16 @@
+# SWE-bench Pro Runner - Docker image for vuls (multi-agent)
+FROM ghcr.io/thecontextlab/swebench-pro-vuls:multi-agent
+
+# The base image already has Claude, Codex, and Gemini CLIs.
+# Just verify they're present and update if needed.
+
+# Verify all CLI tools
+RUN echo "=== Verifying CLI tools ===" && \
+    which claude && echo "✓ Claude CLI found at $(which claude)" || echo "✗ Claude CLI missing" && \
+    which codex && echo "✓ Codex CLI found at $(which codex)" || echo "✗ Codex CLI missing" && \
+    which gemini && echo "✓ Gemini CLI found at $(which gemini)" || echo "✗ Gemini CLI missing"
+
+# Set up Go environment
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+WORKDIR /testbed

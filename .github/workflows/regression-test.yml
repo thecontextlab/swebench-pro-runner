@@ -29,11 +29,20 @@ on:
         description: 'GitHub Actions run ID containing the changes.patch artifact'
         required: true
         type: string
+      timeout_minutes:
+        description: 'Job timeout in minutes (default: 30, increase for long-running tasks)'
+        required: false
+        default: 30
+        type: number
+
+concurrency:
+  group: regression-test-${{ github.actor }}-${{ inputs.repo }}
+  cancel-in-progress: false
 
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) || 30 }}
 
     steps:
       - name: Checkout eval-runner

@@ -1,0 +1,155 @@
+# SWE-bench Pro Runner - Docker image for webclients (Node 22)
+FROM ghcr.io/thecontextlab/swebench-pro-webclients:v6-tests-complete
+
+# Upgrade Node.js from 20 to 22 (required by WebClients package.json: >= 22.14.0)
+# Node 22+ has Iterator as a native V8 intrinsic, fixing "Iterator is not defined"
+# errors caused by core-js polyfill poisoning jsdom's global filter
+# Note: Base image has Node 20 at /usr/local/bin/node which takes PATH precedence
+# over nodesource's /usr/bin/node, so we must replace it explicitly
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx && \
+    ln -s /usr/bin/node /usr/local/bin/node && \
+    ln -s /usr/bin/npm /usr/local/bin/npm && \
+    ln -s /usr/bin/npx /usr/local/bin/npx && \
+    node --version && npm --version
+
+# Fetch specific commits from ProtonMail/WebClients
+# The baked image has a single-commit repo from gitbito/webclients.
+# Task YAMLs reference 129 commits from the original ProtonMail/WebClients repo
+# which has diverged history (force-pushed), so we must fetch each SHA individually.
+COPY webclients_commits.txt /tmp/webclients_commits.txt
+RUN cd /testbed && \
+    git remote add upstream https://github.com/ProtonMail/WebClients.git 2>/dev/null || true && \
+    git remote set-url origin https://github.com/ProtonMail/WebClients.git && \
+    echo "Fetching 129 commits from ProtonMail/WebClients..." && \
+    while read sha; do \
+      git fetch upstream "$sha" --no-tags 2>/dev/null && \
+      git update-ref refs/swebench/"$sha" FETCH_HEAD 2>/dev/null; \
+    done < /tmp/webclients_commits.txt && \
+    echo "Verifying commits..." && \
+    total=$(wc -l < /tmp/webclients_commits.txt) && \
+    found=0 && \
+    while read sha; do \
+      if git cat-file -t "$sha" >/dev/null 2>&1; then \
+        found=$((found + 1)); \
+      else \
+        echo "MISSING: $sha"; \
+      fi; \
+    done < /tmp/webclients_commits.txt && \
+    echo "Fetched $found/$total commits successfully" && \
+    rm /tmp/webclients_commits.txt
+
+# Save the baked Yarn 4 config before git reset overwrites it with Yarn 3.6.0.
+# Historical commits bundle .yarn/releases/yarn-3.6.0.cjs which can't resolve
+# node_modules installed by Yarn 4.12.0. The setup.sh restores these after reset.
+RUN cd /testbed && \
+    cp .yarn/releases/yarn-*.cjs /opt/yarn-baked.cjs && \
+    cp .yarnrc.yml /opt/yarnrc-baked.yml && \
+    cp package.json /opt/package-baked.json && \
+    cp yarn.lock /opt/yarn-lock-baked && \
+    cp .yarn/plugin-postinstall.js /opt/plugin-postinstall-baked.js 2>/dev/null || true && \
+    echo "Saved baked Yarn 4 config + lockfile to /opt/"
+
+# Rebuild native modules for Node 22
+RUN cd /testbed && yarn install
+
+# Install missing historical packages that don't exist in HEAD's node_modules.
+# When tasks git-reset to older commits, code references packages that were
+# removed/renamed between that commit and HEAD. We pre-install them here.
+RUN cd /tmp && \
+    echo "=== Installing historical compatibility packages ===" && \
+    # jsbi (was in packages/shared, removed at HEAD)
+    npm pack jsbi@4.3.0 2>/dev/null && \
+    mkdir -p /testbed/node_modules/jsbi && \
+    tar -xzf jsbi-*.tgz -C /testbed/node_modules/jsbi --strip-components=1 && \
+    rm jsbi-*.tgz && \
+    echo "jsbi@4.3.0" && \
+    # react-sortable-hoc (was in @proton/components, removed at HEAD)
+    npm pack react-sortable-hoc@2.0.0 2>/dev/null && \
+    mkdir -p /testbed/node_modules/react-sortable-hoc && \
+    tar -xzf react-sortable-hoc-*.tgz -C /testbed/node_modules/react-sortable-hoc --strip-components=1 && \
+    rm react-sortable-hoc-*.tgz && \
+    echo "react-sortable-hoc@2.0.0" && \
+    # @floating-ui/react-dom (was in @proton/components, replaced by @floating-ui/dom)
+    npm pack @floating-ui/react-dom@2.1.7 2>/dev/null && \
+    mkdir -p /testbed/node_modules/@floating-ui/react-dom && \
+    tar -xzf floating-ui-react-dom-*.tgz -C /testbed/node_modules/@floating-ui/react-dom --strip-components=1 && \
+    rm floating-ui-react-dom-*.tgz && \
+    echo "@floating-ui/react-dom@2.1.7" && \
+    # pmcrypto-v7 = @protontech/pmcrypto@7.x (yarn alias in historical packages/crypto)
+    npm pack @protontech/pmcrypto@7.20.0 2>/dev/null && \
+    mkdir -p /testbed/node_modules/pmcrypto-v7 && \
+    tar -xzf protontech-pmcrypto-7.20.0.tgz -C /testbed/node_modules/pmcrypto-v7 --strip-components=1 && \
+    rm protontech-pmcrypto-*.tgz && \
+    echo "pmcrypto-v7 (@protontech/pmcrypto@7.20.0)" && \
+    # pmcrypto-v6-canary = @protontech/pmcrypto@8.0.0-canary (yarn alias in historical packages/crypto)
+    npm pack @protontech/pmcrypto@8.0.0-canary.5.patch.0 2>/dev/null && \
+    mkdir -p /testbed/node_modules/pmcrypto-v6-canary && \
+    tar -xzf protontech-pmcrypto-*.tgz -C /testbed/node_modules/pmcrypto-v6-canary --strip-components=1 && \
+    rm protontech-pmcrypto-*.tgz && \
+    echo "pmcrypto-v6-canary (@protontech/pmcrypto@8.0.0-canary.5.patch.0)" && \
+    echo "=== Done: 5 historical packages installed ===" && \
+    # react-polymorphic-box (was in packages/atoms, removed at HEAD)
+    npm pack react-polymorphic-box@3.0.3 2>/dev/null && \
+    mkdir -p /testbed/node_modules/react-polymorphic-box && \
+    tar -xzf react-polymorphic-box-*.tgz -C /testbed/node_modules/react-polymorphic-box --strip-components=1 && \
+    rm react-polymorphic-box-*.tgz && \
+    echo "react-polymorphic-box@3.0.3" && \
+    # hi-base32 (was in packages/shared for TOTP, removed at HEAD)
+    npm pack hi-base32@0.5.1 2>/dev/null && \
+    mkdir -p /testbed/node_modules/hi-base32 && \
+    tar -xzf hi-base32-*.tgz -C /testbed/node_modules/hi-base32 --strip-components=1 && \
+    rm hi-base32-*.tgz && \
+    echo "hi-base32@0.5.1" && \
+    # push.js (was in packages/shared for desktop notifications, removed at HEAD)
+    npm pack push.js@1.0.12 2>/dev/null && \
+    mkdir -p /testbed/node_modules/push.js && \
+    tar -xzf push.js-*.tgz -C /testbed/node_modules/push.js --strip-components=1 && \
+    rm push.js-*.tgz && \
+    echo "push.js@1.0.12" && \
+    echo "=== Done: 8 historical packages installed ===" && \
+    # intersection-observer (polyfill used in @proton/components, removed at HEAD)
+    npm pack intersection-observer@0.12.2 2>/dev/null && \
+    mkdir -p /testbed/node_modules/intersection-observer && \
+    tar -xzf intersection-observer-*.tgz -C /testbed/node_modules/intersection-observer --strip-components=1 && \
+    rm intersection-observer-*.tgz && \
+    echo "intersection-observer@0.12.2" && \
+    echo "=== Done: 9 historical packages installed ==="
+
+# Patch @testing-library/jest-dom v6 exports to allow /extend-expect subpath.
+# v5 had extend-expect as a file; v6 removed it and blocks via exports field.
+# Historical jest.setup.js files import this subpath.
+RUN node -e " \
+    const fs = require('fs'); \
+    const pkgPath = '/testbed/node_modules/@testing-library/jest-dom/package.json'; \
+    const pkg = JSON.parse(fs.readFileSync(pkgPath)); \
+    pkg.exports['./extend-expect'] = { \
+      types: './types/matchers.d.ts', \
+      default: './dist/matchers.js' \
+    }; \
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2)); \
+    console.log('Patched @testing-library/jest-dom exports for ./extend-expect'); \
+    " && \
+    cp /testbed/node_modules/@testing-library/jest-dom/package.json /opt/jest-dom-pkg-patched.json
+
+# Create TextEncoder/TextDecoder polyfill for jest-jsdom environments.
+# Node 22 has these natively, but jest-environment-jsdom's sandbox may not expose them.
+# Historical jest.setup.js imports cross-fetch which needs TextEncoder at load time.
+RUN echo 'const { TextEncoder, TextDecoder } = require("util"); \
+if (typeof globalThis.TextEncoder === "undefined") globalThis.TextEncoder = TextEncoder; \
+if (typeof globalThis.TextDecoder === "undefined") globalThis.TextDecoder = TextDecoder;' \
+    > /opt/textencoder-polyfill.js
+
+# Install multi-agent CLI tools
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+WORKDIR /testbed

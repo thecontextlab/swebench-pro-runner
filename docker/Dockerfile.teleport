@@ -1,0 +1,63 @@
+# SWE-bench Pro Runner - Docker image for teleport
+# Based on SWE-bench Pro base image with repo pre-populated
+FROM ghcr.io/thecontextlab/swebench-pro-teleport:latest
+
+# Install Go 1.21.13 (stable version for Teleport)
+RUN wget -q https://go.dev/dl/go1.21.13.linux-amd64.tar.gz && \
+    rm -rf /usr/local/go && \
+    tar -C /usr/local -xzf go1.21.13.linux-amd64.tar.gz && \
+    rm go1.21.13.linux-amd64.tar.gz && \
+    /usr/local/go/bin/go version
+
+# Install Node.js 20.x and npm (required for CLI tools, especially Gemini which needs Node 20+)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
+
+# Install multi-agent CLI tools (CRITICAL for A/B testing)
+# Claude Code CLI (already installed but verify)
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+# OpenAI Codex CLI
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+# Google Gemini CLI
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+# Verify all CLI tools are installed
+RUN echo "=== Verifying CLI tools ===" && \
+    which claude && echo "✓ Claude CLI found at $(which claude)" || echo "✗ Claude CLI missing" && \
+    which codex && echo "✓ Codex CLI found at $(which codex)" || echo "✗ Codex CLI missing" && \
+    which gemini && echo "✓ Gemini CLI found at $(which gemini)" || echo "✗ Gemini CLI missing"
+
+# Change to testbed directory (base image already has teleport repo)
+WORKDIR /testbed
+
+# Verify the repo is present
+RUN echo "=== Repository Check ===" && \
+    ls -la /testbed | head -5 && \
+    echo "" && \
+    echo "=== Go files count ===" && \
+    find /testbed -name "*.go" -type f | wc -l && \
+    echo "" && \
+    echo "=== Test files count ===" && \
+    find /testbed -name "*_test.go" -type f | wc -l
+
+# Set proper permissions
+RUN chown -R root:root /testbed && \
+    chmod -R 755 /testbed
+
+# Pre-download Go dependencies (if go.mod exists)
+RUN if [ -f go.mod ]; then \
+        /usr/local/go/bin/go mod download || echo "Go mod download completed with warnings"; \
+    fi
+
+# Pre-compile test dependencies to speed up test execution
+RUN cd /testbed && \
+    /usr/local/go/bin/go test -c ./lib/backend/pgbk 2>/dev/null || echo "Test pre-compilation attempted"
+
+WORKDIR /testbed

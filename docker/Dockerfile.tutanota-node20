@@ -1,0 +1,53 @@
+# SWE-bench Pro Runner - Docker image for tutanota (Node 20)
+# Based on the existing Node 20 prebaked Tutanota image
+FROM ghcr.io/thecontextlab/swebench-pro-tutanota:latest
+
+# Install system dependencies needed for native compilation + test running
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    python3-pip \
+    build-essential \
+    python3 \
+    make \
+    g++ \
+    libsecret-1-dev \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust (required for some native modules)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup install 1.84.0 && \
+    rustup default 1.84.0 && \
+    rustc --version
+
+# Install Emscripten 3.1.59 (required for WebAssembly compilation)
+RUN git clone --branch 3.1.59 https://github.com/emscripten-core/emsdk.git /emsdk && \
+    cd /emsdk && \
+    ./emsdk install 3.1.59 && \
+    ./emsdk activate 3.1.59
+ENV PATH="/emsdk:/emsdk/upstream/emscripten:${PATH}"
+ENV EMSDK="/emsdk"
+
+# Upgrade Claude Code CLI to latest
+RUN npm install -g @anthropic-ai/claude-code@latest && \
+    claude --version || echo "Claude CLI installed"
+
+# Install Python dependencies for adapter
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests \
+    google-cloud-storage \
+    pyyaml
+
+WORKDIR /testbed
+
+# Verify
+RUN echo "=== Final environment check ===" && \
+    echo "Node: $(node --version)" && \
+    echo "Rust: $(rustc --version)" && \
+    echo "Emscripten: $(emcc --version | head -1)" && \
+    echo "Xvfb: $(which Xvfb)" && \
+    echo "libsecret: $(pkg-config --modversion libsecret-1 2>/dev/null || echo 'installed')" && \
+    claude --version 2>/dev/null || echo "Claude CLI ready" && \
+    echo "=== Image ready ==="

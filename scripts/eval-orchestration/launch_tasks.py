@@ -51,6 +51,34 @@ def load_already_launched(log_file):
     return launched
 
 
+COST_ESTIMATES = {
+    # Approximate cost per task in USD (rough midpoint estimates)
+    "claude-haiku-4-5-20251001": 0.10,
+    "claude-3-5-haiku-20241022": 0.10,
+    "claude-sonnet-4-5-20250929": 0.30,
+    "claude-sonnet-4-20250514": 0.30,
+    "claude-opus-4-5-20251101": 3.00,
+    "claude-opus-4-6": 3.00,
+    "gpt-4o-mini": 0.10,
+    "gpt-4o": 0.60,
+    "gpt-4-turbo-preview": 0.80,
+    "gpt-5.2-codex": 1.00,
+    "gpt-5.3-codex": 1.50,
+    "o1-preview": 2.00,
+    "o1-mini": 0.50,
+    "gemini-2.0-flash-exp": 0.10,
+    "gemini-1.5-flash": 0.05,
+    "gemini-1.5-pro": 0.50,
+    "gemini-3-pro-preview": 0.80,
+}
+
+
+def estimate_cost(model, num_tasks):
+    """Estimate total cost for a batch of tasks."""
+    per_task = COST_ESTIMATES.get(model, 0.50)  # default $0.50 for unknown models
+    return per_task * num_tasks
+
+
 def launch_task(repo, task_id, model, agent, mcp, dry_run=False):
     """Dispatch a single workflow run. Returns True on success."""
     mcp_str = "true" if mcp else "false"
@@ -101,16 +129,45 @@ Examples:
     parser.add_argument("--delay", type=int, default=5, help="Seconds between launches (default: 5)")
     parser.add_argument("--log-file", help="Log file for tracking launched tasks (enables resume)")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
+    parser.add_argument("--max-tasks", type=int, default=0,
+                        help="Maximum tasks to launch (0 = unlimited, default: 0)")
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="Skip confirmation prompt for large batches")
     args = parser.parse_args()
 
     mcp_bool = args.mcp == "true"
     tasks = load_tasks(args.task_file)
     print(f"Loaded {len(tasks)} tasks from {args.task_file}")
 
+    # Apply max-tasks limit
+    if args.max_tasks > 0 and len(tasks) > args.max_tasks:
+        print(f"Limiting to {args.max_tasks} tasks (--max-tasks). "
+              f"{len(tasks) - args.max_tasks} tasks will not be launched.")
+        tasks = tasks[:args.max_tasks]
+
     # Resume support: skip already-launched tasks
     already_launched = load_already_launched(args.log_file)
     if already_launched:
         print(f"Found {len(already_launched)} already-launched tasks in log")
+
+    # Confirmation prompt for large batches (skip with --dry-run or --yes)
+    tasks_to_launch = len(tasks) - len(already_launched & {f"{r}|{t}" for r, t in tasks})
+    if tasks_to_launch > 10 and not args.dry_run and not args.yes:
+        est_cost = estimate_cost(args.model, tasks_to_launch)
+        print(f"\n{'='*60}")
+        print(f"  About to launch {tasks_to_launch} tasks")
+        print(f"  Model: {args.model}")
+        print(f"  Estimated cost: ~${est_cost:.0f}")
+        print(f"  Delay between launches: {args.delay}s")
+        print(f"{'='*60}")
+        try:
+            response = input("Continue? [y/N] ")
+            if response.lower() != 'y':
+                print("Aborted.")
+                sys.exit(0)
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            sys.exit(0)
 
     log_fh = None
     if args.log_file:
@@ -160,6 +217,9 @@ Examples:
     print(f"Skipped (already launched): {skipped}")
     if args.dry_run:
         print("(DRY RUN - no tasks were actually dispatched)")
+    elif success > 0:
+        est_cost = estimate_cost(args.model, success)
+        print(f"Estimated total cost: ~${est_cost:.0f} ({args.model})")
 
 
 if __name__ == "__main__":

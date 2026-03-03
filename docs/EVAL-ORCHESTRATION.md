@@ -88,6 +88,12 @@ python3 launch_tasks.py \
 | `--delay` | No | `5` | Seconds between launches |
 | `--log-file` | No | — | Log file for resume support (skips already-launched tasks) |
 | `--dry-run` | No | — | Print commands without executing |
+| `--max-tasks` | No | `0` | Maximum tasks to launch (0 = unlimited) |
+| `-y`, `--yes` | No | — | Skip confirmation prompt for large batches |
+
+**Cost safety:** When launching more than 10 tasks, the script shows an estimated cost and asks for confirmation. Use `--yes` to skip this in automated pipelines. Use `--dry-run` to preview without executing.
+
+A sample task file with 100 representative tasks is available at `datasets/sample-100-tasks.txt`.
 
 **Task file format** (pipe-delimited, one per line):
 ```
@@ -320,7 +326,7 @@ cd scripts/eval-orchestration/
 
 # 1. Launch 100 tasks
 python3 launch_tasks.py \
-  --task-file ../../datasets/100-task-list.txt \
+  --task-file ../../datasets/sample-100-tasks.txt \
   --model claude-sonnet-4-5-20250929 \
   --agent claude \
   --mcp false \

@@ -1,0 +1,55 @@
+# SWE-bench Pro Runner - Docker image for element-web (multi-agent)
+# Strategy: Node 20 for CLI tools, Node 18 for project tests (jsdom 16 compat)
+# jsdom 16 (used by element-web 2021) crashes with Node 20's internal APIs
+FROM ghcr.io/thecontextlab/swebench-pro-element-web:latest
+
+# Install CLI tools with Node 20 (already in base image)
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+# Save Node 20 binary for CLI tools
+RUN cp "$(which node)" /usr/local/bin/node20
+
+# Install n version manager and switch to Node 18 for project compatibility
+# Node 18 is the minimum for Claude CLI and avoids jsdom 16 crash on Node 20
+RUN npm install -g n && \
+    n 18 && \
+    hash -r && \
+    echo "Project Node: $(node --version)"
+
+# Ensure yarn is available for Node 18
+RUN npm install -g yarn --force 2>/dev/null || true
+
+# Patch CLI tool entry points to use Node 20
+# Claude CLI entry point
+RUN CLAUDE_ENTRY=$(readlink -f "$(which claude)") && \
+    sed -i '1s|^#!/usr/bin/env node.*|#!/usr/local/bin/node20|' "$CLAUDE_ENTRY" && \
+    echo "Patched claude: $CLAUDE_ENTRY"
+
+# Codex CLI entry point
+RUN CODEX_ENTRY=$(readlink -f "$(which codex)") && \
+    sed -i '1s|^#!/usr/bin/env node.*|#!/usr/local/bin/node20|' "$CODEX_ENTRY" && \
+    echo "Patched codex: $CODEX_ENTRY"
+
+# Gemini CLI entry point
+RUN GEMINI_ENTRY=$(readlink -f "$(which gemini)") && \
+    sed -i '1s|^#!/usr/bin/env node.*|#!/usr/local/bin/node20|' "$GEMINI_ENTRY" && \
+    echo "Patched gemini: $GEMINI_ENTRY"
+
+# Verify everything works
+RUN echo "=== Verifying ===" && \
+    echo "System Node (for tests): $(node --version)" && \
+    echo "CLI Node: $(/usr/local/bin/node20 --version)" && \
+    claude --version && \
+    codex --version && \
+    gemini --version && \
+    which claude && which codex && which gemini && \
+    echo "All tools verified"
+
+WORKDIR /testbed
