@@ -91,6 +91,14 @@ All in `scripts/eval-orchestration/` — Python 3.9+ using only stdlib + pyyaml.
 /run_agent.py       # Agent wrapper (copied from datasets/{repo}/)
 ```
 
+## Configuration Warnings
+
+- **`max_turns` is non-functional** — the workflow accepts this input and passes `MAX_TURNS` to the container, but no agent wrapper reads it. Do not rely on it for cost control.
+- **MCP URLs are empty by default** — all `config.yaml` files ship with `mcp.url:` empty. You must configure a URL before `enable_mcp=true` will have any effect.
+- **`token_secret_name` is dead code** — only present in ansible's config.yaml, never read by any code. MCP auth always uses `secrets.MCP_TOKEN`.
+
+For the full configuration reference, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). For MCP server setup, see [docs/MCP-ONBOARDING.md](docs/MCP-ONBOARDING.md).
+
 ## Key Patterns
 
 - **Test frameworks vary by repo**: pytest (Python repos), go test (Go repos), jest (TS repos), mocha (NodeBB). Each repo's `run_script.sh` handles framework-specific test selection (`-k` for pytest, `-run` for go test, etc.)

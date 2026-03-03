@@ -403,6 +403,18 @@ The platform supports 7 test frameworks across 11 repositories:
 
 Each parser is implemented in `extract_metrics.py` and handles framework-specific output parsing to determine per-test pass/fail outcomes. See [ANALYTICS.md](ANALYTICS.md) for parser details.
 
+## Known Limitations
+
+| Limitation | Impact | Tracking |
+|------------|--------|----------|
+| MCP is Claude-only | Codex and Gemini wrappers have zero MCP code — A/B testing is limited to Claude | [ADR-012](https://github.com/thecontextlab/swebench-pro-runner/issues/27) |
+| `MAX_TURNS` not implemented | Workflow accepts `max_turns` input and passes `MAX_TURNS` env var, but no agent wrapper reads it | [ADR-006](https://github.com/thecontextlab/swebench-pro-runner/issues/21) |
+| 33 duplicate agent wrappers | Each repo has near-identical `run_claude.py`, `run_codex.py`, `run_gemini.py` (11 repos x 3 agents) | [ADR-007](https://github.com/thecontextlab/swebench-pro-runner/issues/22) |
+| MCP server name hardcoded | Always `"mcp-server"` — cannot distinguish providers in analytics | [ADR-002](https://github.com/thecontextlab/swebench-pro-runner/issues/17) |
+| Dead config fields | `token_secret_name`, `max_concurrent`, and `mcp.description` are parsed but never consumed | [ADR-003](https://github.com/thecontextlab/swebench-pro-runner/issues/18) |
+
+For the full configuration surface area (all 6 levels), see [CONFIGURATION.md](CONFIGURATION.md). For MCP server onboarding, see [MCP-ONBOARDING.md](MCP-ONBOARDING.md).
+
 ## Data Flow
 
 ```

@@ -224,6 +224,8 @@ The platform has several guardrails, but **cost management is ultimately your re
 | [DOCKER-IMAGES.md](docs/DOCKER-IMAGES.md) | Image catalog, build process, adding new repositories |
 | [EVAL-ORCHESTRATION.md](docs/EVAL-ORCHESTRATION.md) | Full lifecycle: launch → monitor → download → validate → report |
 | [ANALYTICS.md](docs/ANALYTICS.md) | result.json schema, metrics extraction, cost models |
+| [MCP-ONBOARDING.md](docs/MCP-ONBOARDING.md) | Step-by-step guide for integrating an MCP server |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Full 6-level configuration hierarchy and schema reference |
 
 ## Dataset & Attribution
 

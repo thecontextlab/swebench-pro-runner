@@ -110,4 +110,22 @@ The shell script that provisions the environment inside the Docker container (in
 Git commands executed at the start of each evaluation to set the repository to the correct state: reset to the base commit, then cherry-pick just the test files so the bug is present but the tests exist.
 
 ### Config Hierarchy
-The three-level priority system for resolving Docker images and other settings: **task-specific override** > **task group pattern** > **repository default**. Implemented in `config_loader.py`.
+The three-level priority system for resolving Docker images and other settings: **task-specific override** > **task group pattern** > **repository default**. Implemented in `config_loader.py`. For the full 6-level configuration surface area, see [CONFIGURATION.md](CONFIGURATION.md).
+
+### ADR (Architecture Decision Record)
+A lightweight document capturing an architectural decision: the context, the decision, and its consequences. This project tracks ADRs as GitHub issues indexed at [docs/adr/README.md](adr/README.md).
+
+### Treatment Run
+An evaluation run with MCP enabled (`enable_mcp=true`). The agent gets access to MCP tools in addition to its built-in tools. Compared against a baseline run to measure MCP impact.
+
+### Baseline Run
+An evaluation run with MCP disabled (`enable_mcp=false`). The agent uses only its built-in tools (Bash, Read, Edit, Write, Grep, Glob). Serves as the control condition for A/B testing.
+
+### Tool Allowlisting
+Restricting which tools an agent can use during an evaluation. For Claude, this is controlled via the `--allowedTools` flag. Per-task allowlisting is tracked in [ADR-009](https://github.com/thecontextlab/swebench-pro-runner/issues/24).
+
+### Task Group Pattern
+A regex pattern in `config.yaml` that matches task IDs to route them to specific Docker images or settings. For example, `"ansible__ansible-.*-v(ba6da65a)"` routes matching Ansible tasks to a Python 3.9 image.
+
+### MCP Server Name
+The identifier used as the key in the `mcpServers` configuration dictionary. Currently hardcoded as `"mcp-server"` in all agent wrappers. Tool calls appear as `mcp__<server_name>__<tool>` in logs. Making this configurable is tracked in [ADR-002](https://github.com/thecontextlab/swebench-pro-runner/issues/17).

@@ -318,6 +318,54 @@ ENV MCP_DATA_DIR=/opt/mcp/data
 
 MCP images are optional and only needed if running an MCP server alongside the agent in the same container. Most MCP setups use external HTTP servers configured via `config.yaml`.
 
+## Design Decisions
+
+### Why openlibrary has 5+ image variants
+
+OpenLibrary tasks span multiple years of development. Different task cohorts require different Python versions because the codebase migrated from Python 3.9 to 3.11 to 3.12 over time. A task from 2022 may depend on packages that only install correctly under Python 3.9, while a 2024 task requires Python 3.12 APIs. The `-fixed` variants include patches for dependency resolution issues specific to older Python builds.
+
+### Why element-web patches Node shebangs
+
+The element-web test suite uses jsdom 16, which crashes on Node.js 20 due to breaking changes in the `structuredClone` API. The Dockerfile installs Node 18 for running tests while saving a Node 20 binary at a separate path for the AI agent CLIs (which require Node 20+). Shebang patching ensures test scripts use the correct Node version.
+
+### Why webclients has a karma variant
+
+Most webclients tasks use Jest, but a subset of tasks in the ProtonMail WebClients monorepo use the Karma test runner. The `webclients-karma` image pre-installs Karma, Chrome headless, and related dependencies that would bloat the default image.
+
+### Why tutanota has 4 image variants
+
+Tutanota tasks require different Node.js versions (18, 20, 22) because the Emscripten and Rust WebAssembly build toolchains have specific Node version requirements. Tasks targeting older Emscripten versions need Node 18, while newer builds require Node 20 or 22.
+
+### Version Policy
+
+Agent CLI versions are pinned in Dockerfiles to ensure reproducible evaluations. Current pins:
+
+| CLI | Version | Update Frequency |
+|-----|---------|-----------------|
+| Claude Code (`claude`) | Pinned per Dockerfile | Manual rebuild on new release |
+| Codex CLI (`codex`) | Pinned per Dockerfile | Manual rebuild on new release |
+| Gemini CLI (`gemini`) | Pinned per Dockerfile | Manual rebuild on new release |
+
+To update, rebuild all images with `--no-cache` (see [Image Maintenance](#image-maintenance) below). Automated staleness tracking is planned in [ADR-011](https://github.com/thecontextlab/swebench-pro-runner/issues/26).
+
+### Prebake vs Runtime Split
+
+The platform uses a hybrid strategy: Docker images contain stable, expensive-to-install dependencies while `setup.sh` handles task-specific runtime configuration.
+
+**Prebaked in Dockerfile** (changes rarely):
+- System packages (`apt-get install`)
+- Language runtimes (Go, Python, Node.js)
+- AI agent CLIs (claude, codex, gemini)
+- Dependency caches (`go mod download`, base pip packages, `node_modules`)
+
+**Runtime in setup.sh** (changes per task):
+- Git repository state (`git reset --hard` to base_commit)
+- Task-specific `pip install` with `--timemachine-date` constraints
+- `npm ci` with task-specific `package.json`
+- Virtual environment activation and configuration
+
+This split means images are large (2-5 GB) but evaluations start fast — most dependencies are already installed. Only task-specific setup runs at evaluation time.
+
 ## Image Maintenance
 
 ### Updating Agent CLIs
