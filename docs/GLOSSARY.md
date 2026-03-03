@@ -129,3 +129,12 @@ A regex pattern in `config.yaml` that matches task IDs to route them to specific
 
 ### MCP Server Name
 The identifier used as the key in the `mcpServers` configuration dictionary. Currently hardcoded as `"mcp-server"` in all agent wrappers. Tool calls appear as `mcp__<server_name>__<tool>` in logs. Making this configurable is tracked in [ADR-002](https://github.com/thecontextlab/swebench-pro-runner/issues/17).
+
+### Sidecar Pattern
+An architectural pattern where the agent CLI runs in a dedicated container alongside the repo container, sharing `/testbed` and `/results` via a mounted volume. This decouples agent CLI versions from repo environment setup. Evaluated in [ADR-013](https://github.com/thecontextlab/swebench-pro-runner/issues/28).
+
+### Hybrid Image Strategy
+The approach used by this platform: 22 repo-level Docker images with prebaked dependencies + 731 per-task `setup.sh` scripts for runtime provisioning. Contrasts with the upstream SWE-bench_Pro-os approach of 1,462 per-task Dockerfiles. See [DOCKER-IMAGES.md](DOCKER-IMAGES.md#design-decisions).
+
+### pypi-timemachine
+A tool used by the upstream SWE-bench_Pro-os project (and referenced in our setup.sh scripts) that mocks PyPI to return packages as they existed on a specific date. Ensures dependency installation matches the historical state of the task's codebase.

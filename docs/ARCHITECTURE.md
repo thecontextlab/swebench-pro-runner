@@ -412,6 +412,11 @@ Each parser is implemented in `extract_metrics.py` and handles framework-specifi
 | 33 duplicate agent wrappers | Each repo has near-identical `run_claude.py`, `run_codex.py`, `run_gemini.py` (11 repos x 3 agents) | [ADR-007](https://github.com/thecontextlab/swebench-pro-runner/issues/22) |
 | MCP server name hardcoded | Always `"mcp-server"` — cannot distinguish providers in analytics | [ADR-002](https://github.com/thecontextlab/swebench-pro-runner/issues/17) |
 | Dead config fields | `token_secret_name`, `max_concurrent`, and `mcp.description` are parsed but never consumed | [ADR-003](https://github.com/thecontextlab/swebench-pro-runner/issues/18) |
+| Agent CLIs coupled to repo images | All 22 images include Node.js 20 + 3 agent CLIs; updating a CLI requires rebuilding all images | [ADR-013](https://github.com/thecontextlab/swebench-pro-runner/issues/28) |
+
+### Architectural divergence from upstream
+
+The upstream [SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os) uses 1,462 per-task Dockerfiles (base + instance per task) pre-built on Docker Hub. We use 22 repo-level images with per-task `setup.sh` scripts — a hybrid approach driven by multi-agent CLI requirements and infrastructure failure reduction. A potential future direction is a sidecar pattern that decouples agent CLIs from repo images entirely. See [DOCKER-IMAGES.md](DOCKER-IMAGES.md#design-decisions) for the full rationale.
 
 For the full configuration surface area (all 6 levels), see [CONFIGURATION.md](CONFIGURATION.md). For MCP server onboarding, see [MCP-ONBOARDING.md](MCP-ONBOARDING.md).
 

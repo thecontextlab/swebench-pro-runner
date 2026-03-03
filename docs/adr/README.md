@@ -13,11 +13,12 @@ This directory tracks architectural decisions for the SWE-bench Pro Runner platf
 | ADR-005 | Document the full configuration hierarchy | **Accepted** | [#20](https://github.com/thecontextlab/swebench-pro-runner/issues/20) | High |
 | ADR-006 | `MAX_TURNS` workflow input is accepted but never used | Proposed | [#21](https://github.com/thecontextlab/swebench-pro-runner/issues/21) | High |
 | ADR-007 | Deduplicate 33 agent wrappers to 3 shared files | Proposed | [#22](https://github.com/thecontextlab/swebench-pro-runner/issues/22) | Medium |
-| ADR-008 | Create Docker image manifest with variant rationale | Proposed | [#23](https://github.com/thecontextlab/swebench-pro-runner/issues/23) | Medium |
+| ADR-008 | Create Docker image manifest with variant rationale | **Accepted** | [#23](https://github.com/thecontextlab/swebench-pro-runner/issues/23) | Medium |
 | ADR-009 | Design per-task tool allowlisting for A/B testing | Proposed | [#24](https://github.com/thecontextlab/swebench-pro-runner/issues/24) | Low |
-| ADR-010 | Document hybrid Docker build strategy | Proposed | [#25](https://github.com/thecontextlab/swebench-pro-runner/issues/25) | Low |
+| ADR-010 | Document hybrid Docker build strategy | **Accepted** | [#25](https://github.com/thecontextlab/swebench-pro-runner/issues/25) | Low |
 | ADR-011 | Add batch Docker rebuild with CLI version staleness tracking | Proposed | [#26](https://github.com/thecontextlab/swebench-pro-runner/issues/26) | Low |
 | ADR-012 | Evaluate MCP support for Codex and Gemini agents | Proposed | [#27](https://github.com/thecontextlab/swebench-pro-runner/issues/27) | Low |
+| ADR-013 | Evaluate sidecar pattern for agent CLI containers | Proposed | [#28](https://github.com/thecontextlab/swebench-pro-runner/issues/28) | Low |
 
 ## Status Definitions
 

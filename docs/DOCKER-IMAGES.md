@@ -320,51 +320,99 @@ MCP images are optional and only needed if running an MCP server alongside the a
 
 ## Design Decisions
 
+### Hybrid images vs upstream per-task Dockerfiles
+
+The upstream [SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os) project uses **1,462 Dockerfiles** (2 per task: a base + an instance Dockerfile) to produce per-task Docker images pre-built on Docker Hub. Each task gets an immutable, isolated image with the exact repo commit, dependency snapshot (via `pypi-timemachine`), and build artifacts baked in. Under the hood, these collapse to ~50 unique base image tags and ~69 unique base Dockerfile contents — but the project still ships and manages all 731 instance images.
+
+We took a different approach: **22 repo-level Dockerfiles** producing variant images, combined with **731 per-task `setup.sh` scripts** that handle task-specific provisioning at runtime. This was driven by three factors:
+
+1. **Multi-agent CLI compatibility.** All three agent CLIs (Claude Code, Codex, Gemini) require Node.js 20+. The upstream images don't include agent CLIs at all — they're evaluation-only. We needed Node.js 20 on every image (including Python and Go repos), plus three globally-installed npm packages (`@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli`). Managing CLI version updates across 731 images would be impractical; with 22 images, a rebuild cycle takes minutes.
+
+2. **Infrastructure failure reduction.** An audit of 742 setup scripts found 136 infrastructure failures: 107 from network timeouts (Yarn/NPM registry), 15 from missing build dependencies, and 10 from directory structure issues. Pre-installing common dependencies (Yarn Berry config, CGO libraries, image libraries) in the base image eliminated 90% of these failures and reduced per-task initialization from 3-5 minutes to 10-30 seconds.
+
+3. **Operational simplicity.** 22 Dockerfiles are reviewable and maintainable by a small team. The config_loader.py routing system (task groups with regex patterns → image selection) provides the same task-to-image mapping that the upstream project achieves with 731 instance Dockerfiles.
+
+The tradeoff: our images are larger (2-5 GB vs ~1-2 GB upstream) because they include all three agent CLIs and broader dependency caches. But evaluations start faster since most dependencies are already installed.
+
+### Future direction: sidecar agent CLIs
+
+A potential evolution is a **sidecar pattern** where agent CLIs run in a separate container alongside the repo image. This would:
+- Decouple agent CLI versions from repo environment setup
+- Allow repo images to match the upstream per-task approach (exact runtime, no Node.js 20 pollution)
+- Enable independent agent CLI updates without rebuilding repo images
+- Support running different CLI versions in the same evaluation batch
+
+This is tracked in [ADR-013](https://github.com/thecontextlab/swebench-pro-runner/issues/28).
+
 ### Why openlibrary has 5+ image variants
 
-OpenLibrary tasks span multiple years of development. Different task cohorts require different Python versions because the codebase migrated from Python 3.9 to 3.11 to 3.12 over time. A task from 2022 may depend on packages that only install correctly under Python 3.9, while a 2024 task requires Python 3.12 APIs. The `-fixed` variants include patches for dependency resolution issues specific to older Python builds.
+OpenLibrary tasks span multiple years of development. The codebase migrated from Python 3.9 to 3.11 to 3.12 over time, and task-specific dependencies are pinned via `pypi-timemachine` to dates ranging from 2021 to 2024. A task from 2021 may depend on packages that only install correctly under Python 3.9 with `timemachine_date: "2021-02-01"`, while a 2024 task requires Python 3.12 APIs with `timemachine_date: "2024-10-17"`. The `-fixed` variants include patches for dependency resolution issues discovered during infrastructure validation — specifically, pip version conflicts and broken package metadata in older PyPI snapshots.
+
+Task routing is defined in `datasets/openlibrary/config.yaml` with 5 task groups, each mapping commit-hash regex patterns to the appropriate Python version image.
 
 ### Why element-web patches Node shebangs
 
-The element-web test suite uses jsdom 16, which crashes on Node.js 20 due to breaking changes in the `structuredClone` API. The Dockerfile installs Node 18 for running tests while saving a Node 20 binary at a separate path for the AI agent CLIs (which require Node 20+). Shebang patching ensures test scripts use the correct Node version.
+The element-web test suite uses jsdom 16, which crashes on Node.js 20 due to breaking changes in V8's internal APIs. The Dockerfile uses a dual-Node approach:
 
-### Why webclients has a karma variant
+1. Save the Node 20 binary to `/usr/local/bin/node20`
+2. Install Node 18 via `n` version manager as the default `node`
+3. Patch all three agent CLI entry points (claude, codex, gemini) to use `#!/usr/local/bin/node20` instead of `#!/usr/bin/env node`
 
-Most webclients tasks use Jest, but a subset of tasks in the ProtonMail WebClients monorepo use the Karma test runner. The `webclients-karma` image pre-installs Karma, Chrome headless, and related dependencies that would bloat the default image.
+This means project tests run with Node 18 (jsdom-compatible) while agent CLIs use Node 20 (their minimum requirement). The shebang patching is done at image build time via `sed -i` on the resolved symlink targets.
+
+### Why webclients requires Node 22 and has a karma variant
+
+The WebClients monorepo's `package.json` requires Node `>= 22.14.0`. Earlier Node versions produce `Iterator is not defined` errors from jsdom 16's polyfill interacting with core-js. The base `webclients-node22` image also handles several historical compatibility issues:
+
+- **Yarn version mismatch**: The baked image uses Yarn 4.12.0, but historical task commits have Yarn 3.6.0 lockfiles. The Dockerfile saves the baked Yarn config to `/opt/` so `setup.sh` can restore it after `git reset --hard` to an older commit.
+- **Removed packages**: 8 packages that existed in older commits but were removed at HEAD (jsbi, react-sortable-hoc, pmcrypto-v7, etc.) are pre-installed into `/testbed/node_modules` to avoid import failures during historical test runs.
+- **Jest-dom exports**: `@testing-library/jest-dom` subpath exports are patched to support legacy import patterns.
+
+The **karma variant** (`webclients-karma`) is a separate image for a single task that requires the Karma test runner with Chromium. It adds puppeteer 22.0.0, playwright 1.45.0, and the Playwright Chromium binary — roughly 300 MB of dependencies that would bloat the default image for 64 tasks that don't need them.
 
 ### Why tutanota has 4 image variants
 
-Tutanota tasks require different Node.js versions (18, 20, 22) because the Emscripten and Rust WebAssembly build toolchains have specific Node version requirements. Tasks targeting older Emscripten versions need Node 18, while newer builds require Node 20 or 22.
+Tutanota tasks require different Node.js versions because the codebase has native module dependencies with specific V8 API requirements:
+
+- **Node 22 (default)**: Current master uses `@signalapp/sqlcipher` which is Node 22 compatible
+- **Node 20**: Middle-ground variant for tasks using `better-sqlite3` and `keytar` (incompatible with Node 22 due to V8 API changes)
+- **Node 18**: Legacy tasks with older native module versions
+
+All variants include Rust 1.84.0 (for native module compilation) and Emscripten 3.1.59 (for WebAssembly compilation of crypto libraries). Git submodules (liboqs, argon2, Signal-FTS5-Extension) are initialized at build time.
+
+The root cause analysis is documented in `eval-runner/tutanota_docker_fix_rca.md`: node-gyp compilation failures, missing Emscripten/Rust prerequisites, and `globalThis.crypto` read-only property assignment errors across Node versions.
 
 ### Version Policy
 
-Agent CLI versions are pinned in Dockerfiles to ensure reproducible evaluations. Current pins:
+Agent CLI versions are pinned in Dockerfiles to ensure reproducible evaluations:
 
-| CLI | Version | Update Frequency |
-|-----|---------|-----------------|
-| Claude Code (`claude`) | Pinned per Dockerfile | Manual rebuild on new release |
-| Codex CLI (`codex`) | Pinned per Dockerfile | Manual rebuild on new release |
-| Gemini CLI (`gemini`) | Pinned per Dockerfile | Manual rebuild on new release |
+| CLI | Current Pin | Install Method |
+|-----|-------------|---------------|
+| Claude Code (`claude`) | `@anthropic-ai/claude-code@2.1.42` | `npm install -g` |
+| Codex CLI (`codex`) | `@openai/codex@0.101.0` | `npm install -g` |
+| Gemini CLI (`gemini`) | `@google/gemini-cli@0.28.2` | `npm install -g` |
 
-To update, rebuild all images with `--no-cache` (see [Image Maintenance](#image-maintenance) below). Automated staleness tracking is planned in [ADR-011](https://github.com/thecontextlab/swebench-pro-runner/issues/26).
+All multi-agent images verify CLI installation at build time with `which claude && which codex && which gemini`. To update, rebuild all images with `--no-cache` (see [Image Maintenance](#image-maintenance) below). Automated staleness tracking is planned in [ADR-011](https://github.com/thecontextlab/swebench-pro-runner/issues/26).
 
 ### Prebake vs Runtime Split
 
-The platform uses a hybrid strategy: Docker images contain stable, expensive-to-install dependencies while `setup.sh` handles task-specific runtime configuration.
+The platform uses a hybrid strategy where Docker images contain stable, expensive-to-install dependencies while per-task `setup.sh` scripts handle task-specific runtime configuration. This was derived from auditing the upstream SWE-bench_Pro-os instance Dockerfiles: their `/build.sh` scripts (baked into per-task images) contain the same operations our `setup.sh` scripts run at evaluation time.
 
-**Prebaked in Dockerfile** (changes rarely):
-- System packages (`apt-get install`)
-- Language runtimes (Go, Python, Node.js)
-- AI agent CLIs (claude, codex, gemini)
+**Prebaked in Dockerfile** (changes rarely, expensive to install):
+- System packages (`apt-get install build-essential git curl wget jq`)
+- Language runtimes (Go 1.21/1.22, Python 3.9/3.10/3.11/3.12, Node.js 18/20/22)
+- AI agent CLIs (claude, codex, gemini — require Node.js 20+)
 - Dependency caches (`go mod download`, base pip packages, `node_modules`)
+- Build toolchains (Rust, Emscripten for tutanota; CGO libraries for Go repos)
 
-**Runtime in setup.sh** (changes per task):
-- Git repository state (`git reset --hard` to base_commit)
-- Task-specific `pip install` with `--timemachine-date` constraints
-- `npm ci` with task-specific `package.json`
-- Virtual environment activation and configuration
+**Runtime in setup.sh** (changes per task, derived from upstream instance Dockerfiles):
+- Git repository state (`git reset --hard` to base_commit, `git clean -fdx`)
+- Task-specific `pip install` with `pypi-timemachine` date constraints
+- `npm ci` or `yarn install` with task-specific lockfiles
+- Service startup (Redis for NodeBB, etc.)
+- Virtual environment activation and build steps (`make setup`, `node app --setup`, etc.)
 
-This split means images are large (2-5 GB) but evaluations start fast — most dependencies are already installed. Only task-specific setup runs at evaluation time.
+Only 4 of 11 repos (navidrome, vuls, flipt, element-web) have consistent build commands across all tasks. The other 7 repos require task-specific provisioning — the primary reason per-task `setup.sh` scripts exist.
 
 ## Image Maintenance
 
