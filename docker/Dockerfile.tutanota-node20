@@ -34,6 +34,12 @@ ENV EMSDK="/emsdk"
 RUN npm install -g @anthropic-ai/claude-code@latest && \
     claude --version || echo "Claude CLI installed"
 
+# Cursor Agent CLI (standalone binary, not npm)
+RUN curl https://cursor.com/install -fsS | bash && \
+    cp ~/.local/bin/agent /usr/local/bin/cursor-agent && \
+    chmod +x /usr/local/bin/cursor-agent && \
+    cursor-agent --version || echo "Cursor CLI installed"
+
 # Install Python dependencies for adapter
 RUN pip3 install --no-cache-dir --break-system-packages \
     requests \

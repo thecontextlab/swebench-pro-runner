@@ -86,13 +86,19 @@ RUN npm install -g @openai/codex@0.101.0 && \
 RUN npm install -g @google/gemini-cli@0.28.2 && \
     gemini --version || echo "Gemini CLI installed"
 
+# Cursor Agent CLI (standalone binary, not npm)
+RUN curl https://cursor.com/install -fsS | bash && \
+    cp ~/.local/bin/agent /usr/local/bin/cursor-agent && \
+    chmod +x /usr/local/bin/cursor-agent && \
+    cursor-agent --version || echo "Cursor CLI installed"
+
 # Verify all tools
 RUN echo "=== Verifying ===" && \
     python3 --version && \
     python3 -c "import PyQt5; print('PyQt5 OK')" && \
     python3 -c "import pytest; print('pytest OK')" && \
     pip3 show setuptools | grep Version && \
-    which claude && which codex && which gemini && \
+    which claude && which codex && which gemini && which cursor-agent && \
     echo "All tools verified"
 
 WORKDIR /testbed

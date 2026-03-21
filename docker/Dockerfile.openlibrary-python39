@@ -26,11 +26,18 @@ RUN npm install -g @openai/codex@0.101.0 && \
 RUN npm install -g @google/gemini-cli@0.28.2 && \
     gemini --version || echo "Gemini CLI installed"
 
+# Cursor Agent CLI (standalone binary, not npm)
+RUN curl https://cursor.com/install -fsS | bash && \
+    cp ~/.local/bin/agent /usr/local/bin/cursor-agent && \
+    chmod +x /usr/local/bin/cursor-agent && \
+    cursor-agent --version || echo "Cursor CLI installed"
+
 # Verify all CLI tools are installed
 RUN echo "=== Verifying CLI tools ===" && \
     which claude && echo "✓ Claude CLI found at $(which claude)" || echo "✗ Claude CLI missing" && \
     which codex && echo "✓ Codex CLI found at $(which codex)" || echo "✗ Codex CLI missing" && \
-    which gemini && echo "✓ Gemini CLI found at $(which gemini)" || echo "✗ Gemini CLI missing"
+    which gemini && echo "✓ Gemini CLI found at $(which gemini)" || echo "✗ Gemini CLI missing" && \
+    which cursor-agent && echo "✓ Cursor CLI found at $(which cursor-agent)" || echo "✗ Cursor CLI missing"
 
 # Install Python dependencies for OpenLibrary tasks
 RUN pip3 install --no-cache-dir --break-system-packages \

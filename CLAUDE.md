@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SWE-bench Pro Runner is an evaluation platform for testing AI coding agents (Claude, Codex, Gemini) on 731 real-world software engineering tasks across 11 production repositories. Evaluations run in Docker containers via GitHub Actions: an agent receives a task instruction + failing test, fixes the code, then verification checks that fail-to-pass (F2P) tests now pass and pass-to-pass (P2P) tests don't regress.
+SWE-bench Pro Runner is an evaluation platform for testing AI coding agents (Claude, Codex, Gemini, Cursor) on 731 real-world software engineering tasks across 11 production repositories. Evaluations run in Docker containers via GitHub Actions: an agent receives a task instruction + failing test, fixes the code, then verification checks that fail-to-pass (F2P) tests now pass and pass-to-pass (P2P) tests don't regress.
 
 Built on the [SWE-bench Pro](https://arxiv.org/abs/2509.16941) benchmark by Scale AI. The public dataset is at [ScaleAI/SWE-bench_Pro](https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro) on Hugging Face, with source code at [scaleapi/SWE-bench_Pro-os](https://github.com/scaleapi/SWE-bench_Pro-os).
 
@@ -63,6 +63,7 @@ datasets/{repo}/
 ├── run_claude.py           # Claude Code CLI wrapper
 ├── run_codex.py            # OpenAI Codex CLI wrapper
 ├── run_gemini.py           # Gemini CLI wrapper
+├── run_cursor.py           # Cursor Agent CLI wrapper
 ├── extract_metrics.py      # Parses JSONL agent logs + test output → result.json
 └── tasks/
     ├── {task_id}.yaml      # Task definition (instruction, base_commit, F2P/P2P tests)
@@ -76,7 +77,7 @@ datasets/{repo}/
 - JSONL logging via `log_interaction()`
 - Metrics tracking (tokens, tool usage, cost, errors)
 
-Each repo has three concrete wrappers that invoke the respective CLI tools in the Docker container.
+Each repo has four concrete wrappers that invoke the respective CLI tools in the Docker container.
 
 ### Orchestration Scripts
 All in `scripts/eval-orchestration/` — Python 3.9+ using only stdlib + pyyaml. Shared utilities in `_utils.py` (org→repo mapping, test framework classification). The pipeline: launch → monitor → download → validate → extract failures → (rerun) → assemble best-of-N → audit → report.
@@ -103,7 +104,7 @@ For the full configuration reference, see [docs/CONFIGURATION.md](docs/CONFIGURA
 
 - **Test frameworks vary by repo**: pytest (Python repos), go test (Go repos), jest (TS repos), mocha (NodeBB). Each repo's `run_script.sh` handles framework-specific test selection (`-k` for pytest, `-run` for go test, etc.)
 - **Agent wrappers are per-repo** — they differ slightly in permission modes, allowed tools, and MCP configuration but follow the same structure
-- **`extract_metrics.py` handles all three agent log formats** (Claude JSONL, Codex JSONL, Gemini JSONL) — parsing differs per agent
+- **`extract_metrics.py` handles all four agent log formats** (Claude JSONL, Codex JSONL, Gemini JSONL, Cursor JSON) — parsing differs per agent
 - **Task resolution**: a task is "resolved" only when F2P tests pass AND P2P tests don't regress
 - **MCP is optional**: controlled by `enable_mcp` flag for A/B testing; configured per-repo in `config.yaml`
 
@@ -114,9 +115,10 @@ Every evaluation run costs real money in API fees. When working on this codebase
 - **Never run `launch_tasks.py` without `--dry-run` first** — it dispatches GitHub Actions workflows that consume API credits
 - **`datasets/common/` files are shared** — changes to `config_loader.py` or `base_agent_adapter.py` affect all 11 repositories
 - **Both workflow files must stay in sync** — the repo dropdown in `swebench-eval.yml` and `regression-test.yml` must list the same repos
-- **Agent wrappers have no token/turn limits** — a stuck agent burns credits until the 45-minute timeout kills it
+- **Agent wrappers have no token/turn limits** — a stuck agent burns credits until the 45-minute timeout kills it. Cursor's `run_cursor.py` has an idle-timeout watchdog (120s) to mitigate the known hang issue.
 - **Model costs vary dramatically** — Claude Opus is ~10x more expensive than Haiku; always confirm model choice is intentional
-- Approximate cost per task: Haiku ~$0.10, Sonnet ~$0.30, Opus ~$3.00
+- **Cursor uses subscription pricing** — per-task cost reported as $0.00; not directly comparable to per-token agents
+- Approximate cost per task: Haiku ~$0.10, Sonnet ~$0.30, Opus ~$3.00, Cursor ~$0.00 (subscription)
 
 ## Repositories Covered
 

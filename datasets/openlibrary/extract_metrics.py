@@ -205,6 +205,99 @@ def parse_codex_jsonl(content: str) -> dict:
     return metrics
 
 
+def parse_cursor_json(content: str) -> dict:
+    """Parse Cursor Agent CLI's JSON output format.
+
+    Cursor CLI (beta) -- format may evolve. This parser is defensive
+    and falls back to extracting what it can from wrapper markers.
+    Cursor uses subscription-based pricing, so cost is $0.00 (ADR-015).
+    """
+    metrics = {
+        "duration_seconds": 0,
+        "duration_api_seconds": 0,
+        "total_cost_usd": 0,
+        "cost_model": "subscription",
+        "num_turns": 0,
+        "tokens": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0,
+        },
+        "model_usage": {},
+        "session_id": None,
+        "claude_code_version": None,
+        "mcp_tools": {
+            "total_calls": 0,
+            "tools": {},
+            "queries": [],
+        },
+        "all_tools": {},
+    }
+
+    # Detect model from wrapper output
+    model_match = re.search(r'\[wrapper\] Model:\s*(\S+)', content)
+    detected_model = model_match.group(1) if model_match else "cursor-default"
+
+    # Extract duration from wrapper output
+    duration_match = re.search(r'\[wrapper\] Total duration:\s*([\d.]+)s', content)
+    if duration_match:
+        metrics["duration_seconds"] = float(duration_match.group(1))
+
+    # Detect idle timeout (ADR-016)
+    if "[wrapper] Cursor idle for" in content:
+        metrics["idle_timeout_triggered"] = True
+
+    # Parse JSON lines defensively -- extract what we can
+    for line in content.split('\n'):
+        line = line.strip()
+        if not line or not line.startswith('{'):
+            continue
+        try:
+            event = json.loads(line)
+            event_type = event.get("type", "")
+
+            # Count turns from any turn-like events
+            if "turn" in event_type and "started" in event_type:
+                metrics["num_turns"] += 1
+
+            # Extract token usage if present
+            usage = event.get("usage", {})
+            if usage:
+                metrics["tokens"]["input"] += usage.get("input_tokens", 0)
+                metrics["tokens"]["output"] += usage.get("output_tokens", 0)
+                metrics["tokens"]["cache_read"] += usage.get("cached_input_tokens", usage.get("cache_read_input_tokens", 0))
+
+            # Extract tool usage from tool-related events
+            tool_name = event.get("tool", event.get("name", ""))
+            if tool_name and ("tool" in event_type or "item" in event_type):
+                metrics["all_tools"][tool_name] = metrics["all_tools"].get(tool_name, 0) + 1
+
+            # Extract session/result info
+            if event_type == "result" or event_type == "summary":
+                metrics["duration_seconds"] = event.get("duration_ms", event.get("duration_seconds", 0))
+                if isinstance(metrics["duration_seconds"], (int, float)) and metrics["duration_seconds"] > 1000:
+                    metrics["duration_seconds"] = metrics["duration_seconds"] / 1000  # ms to seconds
+
+        except json.JSONDecodeError:
+            continue
+
+    # Build model usage if we have token data
+    if metrics["tokens"]["input"] > 0 or metrics["tokens"]["output"] > 0:
+        metrics["model_usage"] = {
+            detected_model: {
+                "inputTokens": metrics["tokens"]["input"],
+                "outputTokens": metrics["tokens"]["output"],
+                "cacheReadInputTokens": metrics["tokens"]["cache_read"],
+                "cacheCreationInputTokens": 0,
+                "costUSD": 0,  # Subscription model
+                "contextWindow": 200000,
+            }
+        }
+
+    return metrics
+
+
 def parse_gemini_json(gemini_data: dict) -> dict:
     """Parse Gemini CLI's JSON output format."""
     metrics = {
@@ -445,6 +538,12 @@ def parse_trajectory(agent_log_path: str) -> dict:
                                 except json.JSONDecodeError:
                                     pass
                                 break
+
+    # Check for Cursor CLI output (detected by wrapper marker)
+    if '[wrapper] Starting Cursor Agent...' in content:
+        cursor_metrics = parse_cursor_json(content)
+        if cursor_metrics:
+            return cursor_metrics
 
     # Check for Codex JSONL format
     is_codex = False
@@ -1282,6 +1381,9 @@ def main():
         "session_id": trajectory_metrics["session_id"],
         "claude_code_version": trajectory_metrics["claude_code_version"],
         "timestamp": os.environ.get("TIMESTAMP", ""),
+
+        # Cost model (per-token for Claude/Codex/Gemini, subscription for Cursor)
+        "cost_model": trajectory_metrics.get("cost_model", "per_token"),
 
         # Model breakdown (for cost attribution)
         "model_usage": trajectory_metrics["model_usage"],

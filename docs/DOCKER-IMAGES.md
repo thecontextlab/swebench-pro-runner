@@ -71,9 +71,10 @@ All `multi-agent` tagged images include:
 |-----------|---------|---------------|
 | Claude Code (`claude`) | Latest | `npm install -g @anthropic-ai/claude-code` |
 | Codex CLI (`codex`) | Latest | `npm install -g @openai/codex` |
-| Gemini CLI (`gemini`) | Latest | `npm install -g @anthropic-ai/gemini-cli` |
+| Gemini CLI (`gemini`) | Latest | `npm install -g @google/gemini-cli` |
+| Cursor Agent (`cursor-agent`) | Latest | `curl https://cursor.com/install` + symlink to `/usr/local/bin/cursor-agent` |
 
-Node.js 20 is installed on all images (even Python/Go repos) to support the agent CLIs.
+Node.js 20 is installed on all images (even Python/Go repos) to support the npm-based agent CLIs. Cursor CLI is a standalone binary and does not depend on Node.js.
 
 ### Repository-Specific Dependencies
 

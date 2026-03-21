@@ -22,12 +22,8 @@ def main():
         print("[wrapper] ERROR: OPENAI_API_KEY environment variable not set")
         sys.exit(1)
 
-    # Debug: Log API key presence (not the actual value)
+    # Log API key presence only (never log key content — public repo artifacts are downloadable)
     print(f"[wrapper] API key detected: {'Yes' if api_key else 'No'}")
-    print(f"[wrapper] API key length: {len(api_key) if api_key else 0} characters")
-    if api_key:
-        # Show first 10 chars to verify format (safe for sk- prefix)
-        print(f"[wrapper] API key prefix: {api_key[:10]}...")
 
     # Build completion instruction with explicit implementation requirement
     completion_instruction = """IMPORTANT: You MUST complete the implementation fully. Do NOT stop after analysis.

@@ -19,6 +19,9 @@ This directory tracks architectural decisions for the SWE-bench Pro Runner platf
 | ADR-011 | Add batch Docker rebuild with CLI version staleness tracking | Proposed | [#26](https://github.com/thecontextlab/swebench-pro-runner/issues/26) | Low |
 | ADR-012 | Evaluate MCP support for Codex and Gemini agents | Proposed | [#27](https://github.com/thecontextlab/swebench-pro-runner/issues/27) | Low |
 | ADR-013 | Evaluate sidecar pattern for agent CLI containers | Proposed | [#28](https://github.com/thecontextlab/swebench-pro-runner/issues/28) | Low |
+| ADR-014 | Cursor CLI binary name — symlink to `cursor-agent` | Proposed | [#36](https://github.com/thecontextlab/swebench-pro-runner/issues/36) | High |
+| ADR-015 | Cursor cost model — subscription-based pricing | Proposed | [#36](https://github.com/thecontextlab/swebench-pro-runner/issues/36) | Medium |
+| ADR-016 | Cursor CLI hang mitigation — idle timeout watchdog | Proposed | [#36](https://github.com/thecontextlab/swebench-pro-runner/issues/36) | High |
 
 ## Status Definitions
 

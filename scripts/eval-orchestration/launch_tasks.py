@@ -70,6 +70,10 @@ COST_ESTIMATES = {
     "gemini-1.5-flash": 0.05,
     "gemini-1.5-pro": 0.50,
     "gemini-3-pro-preview": 0.80,
+    # Cursor models (subscription-based, $0.00 per-task cost)
+    "cursor-default": 0.00,
+    "cursor-claude-sonnet": 0.00,
+    "cursor-gpt-4o": 0.00,
 }
 
 

@@ -50,6 +50,7 @@ Repository-level secrets configured in Settings → Secrets and variables → Ac
 | `ANTHROPIC_API_KEY` | Claude agent | Anthropic API key for Claude Code CLI |
 | `OPENAI_API_KEY` | Codex agent | OpenAI API key for Codex CLI |
 | `GEMINI_API_KEY` | Gemini agent | Google API key for Gemini CLI |
+| `CURSOR_API_KEY` | Cursor agent | Cursor API key (from Cursor Dashboard → Cloud Agents → User API Keys) |
 | `MCP_TOKEN` | Claude agent (MCP) | Bearer token for MCP server authentication |
 
 Workflow input API keys (`anthropic_api_key`, etc.) override these secrets when provided.
@@ -164,6 +165,10 @@ These environment variables are set inside the Docker container at runtime by th
 | `ANTHROPIC_API_KEY` | Secret or workflow input | API key for Claude |
 | `OPENAI_API_KEY` | Secret or workflow input | API key for Codex |
 | `GEMINI_API_KEY` | Secret or workflow input | API key for Gemini |
+| `CURSOR_API_KEY` | Secret or workflow input | API key for Cursor |
+| `CURSOR_MODEL` | Workflow input `model` | Model identifier for Cursor CLI |
+| `CURSOR_IDLE_TIMEOUT` | Default: 120 | Seconds of idle before watchdog kills Cursor process |
+| `CURSOR_HARD_TIMEOUT` | Default: 2400 | Maximum runtime in seconds for Cursor agent |
 
 ---
 
@@ -171,15 +176,16 @@ These environment variables are set inside the Docker container at runtime by th
 
 Each agent CLI has different capabilities and permission models:
 
-| Capability | Claude | Codex | Gemini |
-|------------|--------|-------|--------|
-| Permission mode | `acceptEdits` | `full-auto` | `auto-approve` |
-| Output format | `stream-json` (JSONL) | JSONL events | `stream-json` (JSONL) |
-| MCP support | Yes | No | No |
-| Built-in tools | Bash, Edit, Read, Write, Grep, Glob, WebFetch, Task, TodoWrite | Full sandbox access | Bash, Edit, Read, Write, Grep, Glob |
-| Model fallback | No | No | Yes (retries with `gemini-2.0-flash`) |
-| Cost tracking | Via `result` event | Via `turn.completed` events | Via `result` event |
-| Tool allowlisting | `--allowedTools` flag | N/A (sandbox) | N/A (auto-approve all) |
+| Capability | Claude | Codex | Gemini | Cursor |
+|------------|--------|-------|--------|--------|
+| Permission mode | `acceptEdits` | `full-auto` | `auto-approve` | `--force` |
+| Output format | `stream-json` (JSONL) | JSONL events | `stream-json` (JSONL) | `json` |
+| MCP support | Yes | No | No | Deferred (beta limitations) |
+| Built-in tools | Bash, Edit, Read, Write, Grep, Glob, WebFetch, Task, TodoWrite | Full sandbox access | Bash, Edit, Read, Write, Grep, Glob | Full agent autonomy |
+| Model fallback | No | No | Yes (retries with `gemini-2.0-flash`) | No |
+| Cost tracking | Via `result` event | Via `turn.completed` events | Via `result` event | Subscription ($0.00) |
+| Tool allowlisting | `--allowedTools` flag | N/A (sandbox) | N/A (auto-approve all) | N/A (`--force` mode) |
+| Hang mitigation | N/A | N/A | N/A | Idle timeout watchdog (120s) |
 
 ### Claude-specific MCP Behavior
 
@@ -189,9 +195,16 @@ When `enable_mcp=true`:
 - `mcp__mcp-server` is appended to `--allowedTools`
 - A runtime `CLAUDE.md` is written to `/testbed/` with MCP tool hints
 
-### Codex and Gemini
+### Codex, Gemini, and Cursor
 
-Neither Codex nor Gemini wrappers have MCP integration. See [ADR-012](https://github.com/thecontextlab/swebench-pro-runner/issues/27) for planned work.
+Neither Codex, Gemini, nor Cursor wrappers have MCP integration. See [ADR-012](https://github.com/thecontextlab/swebench-pro-runner/issues/27) for planned work.
+
+### Cursor-specific Behavior
+
+- **Binary name:** Installed as `agent`, symlinked to `cursor-agent` at `/usr/local/bin` (see [ADR-014](docs/adr/ADR-014-cursor-binary-name.md))
+- **Idle timeout watchdog:** Monitors stdout activity; kills process after 120s of inactivity (see [ADR-016](docs/adr/ADR-016-cursor-hang-mitigation.md))
+- **Cost model:** Subscription-based; `total_cost_usd` reported as `0.00` with `cost_model: "subscription"` (see [ADR-015](docs/adr/ADR-015-cursor-cost-model.md))
+- **Authentication:** `CURSOR_API_KEY` env var (generated from Cursor Dashboard → Cloud Agents → User API Keys)
 
 ---
 

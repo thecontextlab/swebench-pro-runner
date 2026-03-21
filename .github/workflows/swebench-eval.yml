@@ -34,6 +34,7 @@ on:
           - claude
           - codex
           - gemini
+          - cursor
       model:
         description: 'Model to use (agent-specific)'
         required: false
@@ -60,6 +61,10 @@ on:
           - gemini-1.5-pro
           - gemini-1.5-flash
           - gemini-2.0-flash-exp
+          # Cursor models (routed through Cursor subscription)
+          - cursor-default
+          - cursor-claude-sonnet
+          - cursor-gpt-4o
       enable_mcp:
         description: 'Enable MCP server for A/B testing'
         required: false
@@ -75,6 +80,10 @@ on:
         type: string
       gemini_api_key:
         description: 'Gemini API key (optional, falls back to GEMINI_API_KEY secret)'
+        required: false
+        type: string
+      cursor_api_key:
+        description: 'Cursor API key (optional, falls back to CURSOR_API_KEY secret)'
         required: false
         type: string
       timeout_minutes:
@@ -280,6 +289,16 @@ jobs:
                 echo "gemini_key=${{ secrets.GEMINI_API_KEY }}" >> $GITHUB_OUTPUT
               fi
               ;;
+            cursor)
+              if [ -n "${{ inputs.cursor_api_key }}" ]; then
+                echo "::add-mask::${{ inputs.cursor_api_key }}"
+                echo "Using Cursor API key from workflow input (masked)"
+                echo "cursor_key=${{ inputs.cursor_api_key }}" >> $GITHUB_OUTPUT
+              else
+                echo "Using Cursor API key from repository secret"
+                echo "cursor_key=${{ secrets.CURSOR_API_KEY }}" >> $GITHUB_OUTPUT
+              fi
+              ;;
           esac
 
       - name: Run task with AI Agent
@@ -341,6 +360,11 @@ jobs:
               AGENT_SCRIPT="run_gemini.py"
               API_KEY_ENV="-e GEMINI_API_KEY=${{ steps.apikey.outputs.gemini_key }}"
               MODEL_ENV="-e GEMINI_MODEL=${{ inputs.model }}"
+              ;;
+            cursor)
+              AGENT_SCRIPT="run_cursor.py"
+              API_KEY_ENV="-e CURSOR_API_KEY=${{ steps.apikey.outputs.cursor_key }}"
+              MODEL_ENV="-e CURSOR_MODEL=${{ inputs.model }}"
               ;;
           esac
 
@@ -614,6 +638,33 @@ jobs:
             echo "| **Cost** | \$${COST} |" >> $GITHUB_STEP_SUMMARY
           else
             echo "## Result: **error** (no result file)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Scrub API keys from artifacts
+        if: always()
+        run: |
+          # PUBLIC REPO SAFETY: Scrub any API keys that may have leaked into logs
+          # Artifacts are publicly downloadable — ensure no secrets survive
+          RESULTS_DIR="${{ steps.results.outputs.path }}"
+          if [ -d "$RESULTS_DIR" ]; then
+            for LOG_FILE in "$RESULTS_DIR"/agent.log "$RESULTS_DIR"/*.log; do
+              [ -f "$LOG_FILE" ] || continue
+
+              # Scrub known API key patterns
+              # Anthropic: sk-ant-...
+              sed -i 's/sk-ant-[A-Za-z0-9_-]\{20,\}/[REDACTED_ANTHROPIC_KEY]/g' "$LOG_FILE"
+              # OpenAI: sk-...
+              sed -i 's/sk-[A-Za-z0-9]\{20,\}/[REDACTED_OPENAI_KEY]/g' "$LOG_FILE"
+              # Generic long bearer tokens / API keys (40+ alphanumeric chars that look like keys)
+              # Cursor and Gemini keys don't have a known prefix, so scrub env var echoes
+              sed -i 's/CURSOR_API_KEY=[^ ]*/CURSOR_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              sed -i 's/GEMINI_API_KEY=[^ ]*/GEMINI_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              sed -i 's/ANTHROPIC_API_KEY=[^ ]*/ANTHROPIC_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              sed -i 's/OPENAI_API_KEY=[^ ]*/OPENAI_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              # Scrub "API key prefix: ..." lines from older Codex wrappers
+              sed -i 's/API key prefix: .*/API key prefix: [REDACTED]/g' "$LOG_FILE"
+            done
+            echo "Log files scrubbed for API key patterns"
           fi
 
       - name: Upload results
