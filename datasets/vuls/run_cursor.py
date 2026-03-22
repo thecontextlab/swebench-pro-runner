@@ -57,19 +57,22 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
         print("[wrapper] MCP tools may not be available. Proceeding without MCP.")
 
     # Build Cursor CLI command
-    # --print: non-interactive/headless mode
+    # -p: non-interactive/headless mode (boolean flag)
     # --force: autonomous file modifications without confirmation prompts
     # --output-format json: structured output for metrics parsing
+    # prompt is a trailing positional argument
     cmd = [
         "cursor-agent",
-        "--print",
-        completion_instruction,
+        "-p",
         "--output-format", "json",
         "--force",
     ]
 
     if model:
         cmd.extend(["-m", model])
+
+    # Prompt must be the last positional argument
+    cmd.append(completion_instruction)
 
     # Set up environment with API key
     env = os.environ.copy()
@@ -96,7 +99,7 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
     print("--- END COMPLETION INSTRUCTION ---")
     print("")
     print("--- FULL COMMAND ---")
-    cmd_display = ["cursor-agent", "--print", "<prompt>", "--output-format", "json", "--force"]
+    cmd_display = ["cursor-agent", "-p", "--output-format", "json", "--force"]
     if model:
         cmd_display.extend(["-m", model])
     print(" ".join(cmd_display))

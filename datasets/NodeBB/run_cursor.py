@@ -62,14 +62,16 @@ NOTE: This is a Node.js/TypeScript project. Use the project's test runner (jest,
     # --output-format json: structured output for metrics parsing
     cmd = [
         "cursor-agent",
-        "--print",
-        completion_instruction,
+        "-p",
         "--output-format", "json",
         "--force",
     ]
 
     if model:
         cmd.extend(["-m", model])
+
+    # Prompt must be the last positional argument
+    cmd.append(completion_instruction)
 
     # Set up environment with API key
     env = os.environ.copy()
@@ -92,7 +94,7 @@ NOTE: This is a Node.js/TypeScript project. Use the project's test runner (jest,
     print("--- END COMPLETION INSTRUCTION ---")
     print("")
     print("--- FULL COMMAND ---")
-    cmd_display = ["cursor-agent", "--print", "<prompt>", "--output-format", "json", "--force"]
+    cmd_display = ["cursor-agent", "-p", "--output-format", "json", "--force"]
     if model:
         cmd_display.extend(["-m", model])
     print(" ".join(cmd_display))
