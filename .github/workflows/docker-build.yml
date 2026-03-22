@@ -144,8 +144,8 @@ jobs:
           SIZE=$(docker image inspect "$IMAGE" --format '{{.Size}}' | numfmt --to=iec-i --suffix=B)
           echo "Image size: $SIZE"
 
-          # Verify basic tools
-          docker run --rm "$IMAGE" bash -c '
+          # Verify basic tools (override entrypoint to avoid GCS adapter resolution)
+          docker run --rm --entrypoint bash "$IMAGE" -c '
             echo "=== Tool Verification ==="
             ERRORS=0
             for cmd in git bash; do
@@ -158,7 +158,7 @@ jobs:
             done
 
             # Check for agent CLIs (optional — not all images have them)
-            for cmd in claude codex gemini; do
+            for cmd in claude codex gemini cursor-agent; do
               if which $cmd > /dev/null 2>&1; then
                 echo "  OK: $cmd ($(which $cmd))"
               else
