@@ -4,10 +4,10 @@ FROM ghcr.io/thecontextlab/swebench-pro-vuls:multi-agent
 # The base image already has Claude, Codex, and Gemini CLIs.
 # Just verify they're present and update if needed.
 
-# Cursor Agent CLI (standalone binary, not npm)
+# Cursor Agent CLI (installs to ~/.local/bin with bundled node)
+# Symlink instead of copy so $SCRIPT_DIR resolves to the install dir with bundled node
 RUN curl https://cursor.com/install -fsS | bash && \
-    cp ~/.local/bin/agent /usr/local/bin/cursor-agent && \
-    chmod +x /usr/local/bin/cursor-agent && \
+    ln -sf ~/.local/bin/agent /usr/local/bin/cursor-agent && \
     cursor-agent --version || echo "Cursor CLI installed"
 
 # Verify all CLI tools

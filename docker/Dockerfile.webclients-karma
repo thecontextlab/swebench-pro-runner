@@ -60,8 +60,7 @@ RUN cd /testbed && node -e " \
 
 # Cursor Agent CLI (standalone binary, not npm)
 RUN curl https://cursor.com/install -fsS | bash && \
-    cp ~/.local/bin/agent /usr/local/bin/cursor-agent && \
-    chmod +x /usr/local/bin/cursor-agent && \
+    ln -sf ~/.local/bin/agent /usr/local/bin/cursor-agent && \
     cursor-agent --version || echo "Cursor CLI installed"
 
 WORKDIR /testbed
