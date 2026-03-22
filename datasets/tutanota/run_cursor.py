@@ -57,21 +57,21 @@ NOTE: This is a Node.js/TypeScript project. Use the project's test runner (jest,
         print("[wrapper] MCP tools may not be available. Proceeding without MCP.")
 
     # Build Cursor CLI command
-    # --print: non-interactive/headless mode
-    # --force: autonomous file modifications without confirmation prompts
-    # --output-format json: structured output for metrics parsing
+    # Flag order matters: -f and --model must come before -p
+    # --output-format stream-json gives rich JSONL with tokens, session, thinking events
     cmd = [
         "cursor-agent",
-        "-p",
-        "--output-format", "json",
-        "--force",
+        "-f",
     ]
 
     if model:
-        cmd.extend(["-m", model])
+        cmd.extend(["--model", model])
 
-    # Prompt must be the last positional argument
-    cmd.append(completion_instruction)
+    cmd.extend([
+        "--output-format", "stream-json",
+        "-p",
+        completion_instruction,
+    ])
 
     # Set up environment with API key
     env = os.environ.copy()
@@ -94,9 +94,10 @@ NOTE: This is a Node.js/TypeScript project. Use the project's test runner (jest,
     print("--- END COMPLETION INSTRUCTION ---")
     print("")
     print("--- FULL COMMAND ---")
-    cmd_display = ["cursor-agent", "-p", "--output-format", "json", "--force"]
+    cmd_display = ["cursor-agent", "-f"]
     if model:
-        cmd_display.extend(["-m", model])
+        cmd_display.extend(["--model", model])
+    cmd_display.extend(["--output-format", "stream-json", "-p", "<prompt>"])
     print(" ".join(cmd_display))
     print("--- END COMMAND ---")
     print("=" * 80)

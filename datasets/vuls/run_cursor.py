@@ -57,22 +57,21 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
         print("[wrapper] MCP tools may not be available. Proceeding without MCP.")
 
     # Build Cursor CLI command
-    # -p: non-interactive/headless mode (boolean flag)
-    # --force: autonomous file modifications without confirmation prompts
-    # --output-format json: structured output for metrics parsing
-    # prompt is a trailing positional argument
+    # Flag order matters: -f and --model must come before -p
+    # --output-format stream-json gives rich JSONL with tokens, session, thinking events
     cmd = [
         "cursor-agent",
-        "-p",
-        "--output-format", "json",
-        "--force",
+        "-f",
     ]
 
     if model:
-        cmd.extend(["-m", model])
+        cmd.extend(["--model", model])
 
-    # Prompt must be the last positional argument
-    cmd.append(completion_instruction)
+    cmd.extend([
+        "--output-format", "stream-json",
+        "-p",
+        completion_instruction,
+    ])
 
     # Set up environment with API key
     env = os.environ.copy()
@@ -99,7 +98,10 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
     print("--- END COMPLETION INSTRUCTION ---")
     print("")
     print("--- FULL COMMAND ---")
-    cmd_display = ["cursor-agent", "-p", "--output-format", "json", "--force"]
+    cmd_display = ["cursor-agent", "-f"]
+    if model:
+        cmd_display.extend(["--model", model])
+    cmd_display.extend(["--output-format", "stream-json", "-p", "<prompt>"])
     if model:
         cmd_display.extend(["-m", model])
     print(" ".join(cmd_display))
@@ -120,20 +122,19 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
     sys.stdout.flush()
     sys.stderr.flush()
 
+    start_time = time.time()
+
     # Use Popen with idle-timeout watchdog (ADR-016)
     process = subprocess.Popen(
         cmd,
         cwd="/testbed",
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
-        universal_newlines=True
     )
 
     last_output_time = [time.time()]
-    start_time = time.time()
 
     def watchdog():
         """Monitor for idle timeout and hard timeout."""
@@ -144,21 +145,21 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
 
             # Check hard timeout
             if total_duration > HARD_TIMEOUT_SECONDS:
-                print(f"\n[wrapper] Hard timeout reached ({HARD_TIMEOUT_SECONDS}s), sending SIGTERM")
+                print(f"\n[wrapper] Hard timeout reached ({HARD_TIMEOUT_SECONDS}s), sending SIGTERM", flush=True)
                 process.terminate()
                 time.sleep(5)
                 if process.poll() is None:
-                    print("[wrapper] Process did not terminate, sending SIGKILL")
+                    print("[wrapper] Process did not terminate, sending SIGKILL", flush=True)
                     process.kill()
                 return
 
             # Check idle timeout
             if idle_duration > IDLE_TIMEOUT_SECONDS:
-                print(f"\n[wrapper] Cursor idle for >{IDLE_TIMEOUT_SECONDS}s, sending SIGTERM")
+                print(f"\n[wrapper] Cursor idle for >{IDLE_TIMEOUT_SECONDS}s, sending SIGTERM", flush=True)
                 process.terminate()
                 time.sleep(5)
                 if process.poll() is None:
-                    print("[wrapper] Process did not terminate, sending SIGKILL")
+                    print("[wrapper] Process did not terminate, sending SIGKILL", flush=True)
                     process.kill()
                 return
 
@@ -167,14 +168,16 @@ NOTE: Go is installed at /usr/local/go/bin/go. If 'go' command is not found, use
     watchdog_thread = threading.Thread(target=watchdog, daemon=True)
     watchdog_thread.start()
 
-    # Stream output line by line
-    for line in iter(process.stdout.readline, ''):
-        if line:
-            last_output_time[0] = time.time()
-            print(line, end='', flush=True)
+    # Read stdout and stderr together
+    stdout_data, stderr_data = process.communicate()
 
-    # Wait for process to complete
-    process.wait()
+    # Print all output (stdout first, then stderr)
+    if stdout_data:
+        last_output_time[0] = time.time()
+        print(stdout_data, end='', flush=True)
+    if stderr_data:
+        last_output_time[0] = time.time()
+        print(stderr_data, end='', flush=True)
 
     print("\n[wrapper] ========================================")
     print(f"[wrapper] Cursor CLI exited with code: {process.returncode}")
