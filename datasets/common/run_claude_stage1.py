@@ -74,7 +74,7 @@ def main() -> int:
         problem = f.read().strip()
 
     model = os.environ.get("MODEL", "claude-opus-4-7")
-    effort = os.environ.get("EFFORT", "xhigh")
+    effort = os.environ.get("EFFORT", "max")
     mcp_url = os.environ.get("MCP_URL", "")
     mcp_token = os.environ.get("MCP_TOKEN", "")
 

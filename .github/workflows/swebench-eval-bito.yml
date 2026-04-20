@@ -28,15 +28,14 @@ on:
           - claude-opus-4-7
           - claude-opus-4-6
       effort:
-        description: 'Claude --effort level (session-scoped, passed to CLI)'
+        description: 'Claude --effort level (session-scoped, passed to CLI). NOTE: xhigh requires a newer CLI than the current image ships; max is the highest supported.'
         required: false
-        default: 'xhigh'
+        default: 'max'
         type: choice
         options:
           - low
           - medium
           - high
-          - xhigh
           - max
       anthropic_api_key:
         description: 'Anthropic API key (optional, falls back to ANTHROPIC_API_KEY secret)'
