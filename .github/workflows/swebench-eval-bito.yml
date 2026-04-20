@@ -513,6 +513,9 @@ jobs:
           RESULTS="${{ steps.results.outputs.path }}"
           DEBUG_DIR="${RESULTS}-debug"
           mkdir -p "$DEBUG_DIR"
+          # Docker writes /results contents as root; the runner user needs write
+          # permission to rearrange them, so chown the whole tree to the runner.
+          sudo chown -R "$USER:$USER" "$RESULTS" "$DEBUG_DIR"
           # Move Bito-specific extras out of the ETL-bound dir so its file set
           # matches the original SWE-bench-Pro artifact schema exactly.
           for extra in audit pipeline_artifacts stage1.log stage2.log stage3.log; do
@@ -535,7 +538,9 @@ jobs:
           retention-days: 90
 
       - name: Upload Bito debug artifact
-        if: always()
+        # Only upload if split succeeded and produced a debug_path; otherwise
+        # a default empty path causes upload-artifact to scan / which fails.
+        if: always() && steps.split.outputs.debug_path != ''
         uses: actions/upload-artifact@v4
         with:
           name: swebench-bito-debug-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
