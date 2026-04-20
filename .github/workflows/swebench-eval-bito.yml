@@ -28,9 +28,9 @@ on:
           - claude-opus-4-7
           - claude-opus-4-6
       effort:
-        description: 'Claude --effort level (session-scoped, passed to CLI). NOTE: xhigh requires a newer CLI than the current image ships; max is the highest supported.'
+        description: 'Claude --effort level (session-scoped, passed to CLI)'
         required: false
-        default: 'max'
+        default: 'high'
         type: choice
         options:
           - low

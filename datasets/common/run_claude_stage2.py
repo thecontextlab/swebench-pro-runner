@@ -60,7 +60,7 @@ def main() -> int:
         return 2
 
     model = os.environ.get("MODEL", "claude-opus-4-7")
-    effort = os.environ.get("EFFORT", "max")
+    effort = os.environ.get("EFFORT", "high")
     mcp_url = os.environ.get("MCP_URL", "")
     mcp_token = os.environ.get("MCP_TOKEN", "")
 
