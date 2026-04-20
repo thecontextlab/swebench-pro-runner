@@ -330,6 +330,43 @@ jobs:
               mkdir -p /testbed/pipeline_artifacts
 
               echo ""
+              echo "=== Step 5b: Hide test files from planning (defeat test-oracle shortcut) ==="
+              # Many SWE-bench tasks bundle the failing test as part of the task
+              # setup (before_repo_set_cmd git-checks-out a test that contains
+              # the exact expected output). Agents that read the test first
+              # can reverse-engineer the fix verbatim and skip the Bito
+              # planning/MCP work entirely. We move test files to a shadow
+              # location for stages 1+2, then restore them before stage 3.
+              mkdir -p /tmp/oracle-shadow
+              cd /testbed
+              : > /tmp/oracle-paths.txt
+              find . -type f \( \
+                  -name "*_test.go" -o \
+                  -name "test_*.py" -o \
+                  -name "*_test.py" -o \
+                  -name "*.test.ts" -o -name "*.test.tsx" -o \
+                  -name "*.test.js" -o -name "*.test.jsx" -o \
+                  -name "*.spec.ts" -o -name "*.spec.tsx" -o \
+                  -name "*.spec.js" -o -name "*.spec.jsx" \
+                \) ! -path "./.git/*" >> /tmp/oracle-paths.txt
+              find . -type d \( -name "tests" -o -name "__tests__" -o -name "__test__" \) ! -path "./.git/*" >> /tmp/oracle-paths.txt || true
+              HIDDEN=0
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                src="/testbed/$p"
+                dst="/tmp/oracle-shadow/$p"
+                if [ -e "$src" ]; then
+                  mkdir -p "$(dirname "$dst")"
+                  mv "$src" "$dst"
+                  HIDDEN=$((HIDDEN+1))
+                fi
+              done < /tmp/oracle-paths.txt
+              echo "Hid $HIDDEN test paths from /testbed for stages 1-2"
+              # Audit evidence: what we hid so reviewers can verify this ran.
+              cp /tmp/oracle-paths.txt /results/audit/oracle_hidden_paths.txt 2>/dev/null || true
+
+              echo ""
               echo "=== Stage 1: scope-to-plan ==="
               set +e
               python3 /run_stage1.py 2>&1 | tee /results/stage1.log
@@ -359,6 +396,22 @@ jobs:
                 exit 21
               fi
               echo "Stage 2 OK — $WS_COUNT workstream spec(s)"
+
+              echo ""
+              echo "=== Step 5.7b: Restore test files for Stage 3 execution ==="
+              RESTORED=0
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                src="/tmp/oracle-shadow/$p"
+                dst="/testbed/$p"
+                if [ -e "$src" ]; then
+                  mkdir -p "$(dirname "$dst")"
+                  mv "$src" "$dst"
+                  RESTORED=$((RESTORED+1))
+                fi
+              done < /tmp/oracle-paths.txt
+              echo "Restored $RESTORED test paths for Stage 3"
 
               echo ""
               echo "=== Stage 3: agent-spec-executor ==="
