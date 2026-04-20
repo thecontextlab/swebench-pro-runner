@@ -409,25 +409,12 @@ jobs:
               else
                 STATUS="failed"
               fi
+              echo "Pipeline status: $STATUS (stage1=$STAGE1_EXIT stage2=$STAGE2_EXIT stage3=$STAGE3_EXIT verify=$VERIFY_EXIT)"
 
-              cat > /results/result.json << RESULT_EOF
-          {
-            "task": "$TASK_ID",
-            "status": "$STATUS",
-            "model": "$MODEL",
-            "effort": "$EFFORT",
-            "mcp_enabled": true,
-            "pipeline": "bito-3-stage",
-            "stage1_exit_code": $STAGE1_EXIT,
-            "stage2_exit_code": $STAGE2_EXIT,
-            "stage3_exit_code": $STAGE3_EXIT,
-            "verification_exit_code": $VERIFY_EXIT,
-            "p2p_pre_exit_code": $P2P_PRE_EXIT,
-            "p2p_post_exit_code": $P2P_POST_EXIT,
-            "workstream_count": $WS_COUNT,
-            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          RESULT_EOF
+              # Concat stage logs into agent.log so extract_metrics.py (which expects a
+              # single JSONL trajectory, matching the original non-Bito pipeline) can
+              # produce the full 25-key result.json schema the ETL consumes.
+              cat /results/stage1.log /results/stage2.log /results/stage3.log > /results/agent.log 2>/dev/null || true
 
               echo "$STAGE3_EXIT" > /results/.agent_exit
               echo "$VERIFY_EXIT" > /results/.verify_exit
@@ -444,22 +431,25 @@ jobs:
           REPO_NAME: ${{ inputs.repo }}
           FAIL_TO_PASS_FILE: ${{ github.workspace }}/fail_to_pass.txt
           PASS_TO_PASS_FILE: ${{ github.workspace }}/pass_to_pass.txt
+          MCP_CONFIG: "1"
         run: |
           cd ${{ github.workspace }}
           AGENT_EXIT=$(cat ${{ steps.results.outputs.path }}/.agent_exit 2>/dev/null || echo "1")
           VERIFY_EXIT=$(cat ${{ steps.results.outputs.path }}/.verify_exit 2>/dev/null || echo "1")
 
-          if [ -f "datasets/${{ inputs.repo }}/extract_metrics.py" ]; then
-            # Run extractor — it writes result.json. For the Bito pipeline, it may
-            # not understand the multi-stage logs yet; the in-container result.json
-            # already has the essential per-stage exit codes.
-            RESULTS_DIR="${{ steps.results.outputs.path }}" \
-            AGENT_EXIT_CODE="$AGENT_EXIT" \
-            VERIFY_EXIT_CODE="$VERIFY_EXIT" \
-            TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            python3 datasets/${{ inputs.repo }}/extract_metrics.py || \
-              echo "WARN: extract_metrics.py failed; keeping in-container result.json"
+          if [ ! -f "datasets/${{ inputs.repo }}/extract_metrics.py" ]; then
+            echo "ERROR: datasets/${{ inputs.repo }}/extract_metrics.py missing — cannot produce ETL-compatible result.json"
+            exit 1
           fi
+
+          # Produce the full 25-key result.json matching the original SWE-bench-Pro
+          # schema. Consumes /results/agent.log (concatenated from the three stage
+          # logs inside the container) plus changes.patch + verification logs.
+          RESULTS_DIR="${{ steps.results.outputs.path }}" \
+          AGENT_EXIT_CODE="$AGENT_EXIT" \
+          VERIFY_EXIT_CODE="$VERIFY_EXIT" \
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          python3 datasets/${{ inputs.repo }}/extract_metrics.py
 
       - name: Generate summary
         if: always()
@@ -470,13 +460,17 @@ jobs:
 
           if [ -f "$RESULT_FILE" ]; then
             STATUS=$(jq -r '.status // "unknown"' "$RESULT_FILE")
-            S1=$(jq -r '.stage1_exit_code // "-"' "$RESULT_FILE")
-            S2=$(jq -r '.stage2_exit_code // "-"' "$RESULT_FILE")
-            S3=$(jq -r '.stage3_exit_code // "-"' "$RESULT_FILE")
-            VE=$(jq -r '.verification_exit_code // "-"' "$RESULT_FILE")
-            WS=$(jq -r '.workstream_count // "-"' "$RESULT_FILE")
+            RESOLVED=$(jq -r '.resolved // false' "$RESULT_FILE")
+            F2P_PASS=$(jq -r '.tests.passed // 0' "$RESULT_FILE")
+            F2P_TOTAL=$(jq -r '.tests.total // 0' "$RESULT_FILE")
+            P2P_PASS=$(jq -r '.p2p_tests.passed // 0' "$RESULT_FILE")
+            P2P_TOTAL=$(jq -r '.p2p_tests.total // 0' "$RESULT_FILE")
+            COST=$(jq -r '.total_cost_usd // 0' "$RESULT_FILE")
+            DURATION=$(jq -r '.duration_seconds // 0' "$RESULT_FILE")
+            TOOL_CALLS=$(jq -r '.tool_usage.total_tool_calls // 0' "$RESULT_FILE")
+            MCP_CALLS=$(jq -r '.tool_usage.mcp_tools.total_calls // 0' "$RESULT_FILE")
 
-            if [ "$STATUS" = "success" ]; then
+            if [ "$RESOLVED" = "true" ]; then
               echo "## Result: **RESOLVED** :white_check_mark:" >> $GITHUB_STEP_SUMMARY
             else
               echo "## Result: **UNRESOLVED** :x:" >> $GITHUB_STEP_SUMMARY
@@ -488,11 +482,11 @@ jobs:
             echo "| Repo | ${{ inputs.repo }} |" >> $GITHUB_STEP_SUMMARY
             echo "| Model | ${{ inputs.model }} |" >> $GITHUB_STEP_SUMMARY
             echo "| Effort | ${{ inputs.effort }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Stage 1 exit | $S1 |" >> $GITHUB_STEP_SUMMARY
-            echo "| Stage 2 exit | $S2 |" >> $GITHUB_STEP_SUMMARY
-            echo "| Stage 3 exit | $S3 |" >> $GITHUB_STEP_SUMMARY
-            echo "| Workstreams | $WS |" >> $GITHUB_STEP_SUMMARY
-            echo "| F2P verify exit | $VE |" >> $GITHUB_STEP_SUMMARY
+            echo "| F2P tests | $F2P_PASS / $F2P_TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| P2P tests | $P2P_PASS / $P2P_TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Tool calls (total / MCP) | $TOOL_CALLS / $MCP_CALLS |" >> $GITHUB_STEP_SUMMARY
+            echo "| Duration (s) | $DURATION |" >> $GITHUB_STEP_SUMMARY
+            echo "| Cost (USD) | $COST |" >> $GITHUB_STEP_SUMMARY
           else
             echo "## Result: **error** (no result file)" >> $GITHUB_STEP_SUMMARY
           fi
@@ -512,10 +506,38 @@ jobs:
             done
           fi
 
-      - name: Upload results
+      - name: Split artifacts (ETL-compatible + Bito debug)
+        id: split
+        if: always()
+        run: |
+          RESULTS="${{ steps.results.outputs.path }}"
+          DEBUG_DIR="${RESULTS}-debug"
+          mkdir -p "$DEBUG_DIR"
+          # Move Bito-specific extras out of the ETL-bound dir so its file set
+          # matches the original SWE-bench-Pro artifact schema exactly.
+          for extra in audit pipeline_artifacts stage1.log stage2.log stage3.log; do
+            if [ -e "$RESULTS/$extra" ]; then
+              mv "$RESULTS/$extra" "$DEBUG_DIR/"
+            fi
+          done
+          echo "debug_path=$DEBUG_DIR" >> $GITHUB_OUTPUT
+          echo "=== ETL artifact contents ==="
+          ls -la "$RESULTS"
+          echo "=== Debug artifact contents ==="
+          ls -la "$DEBUG_DIR"
+
+      - name: Upload ETL artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: swebench-bito-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
           path: ${{ steps.results.outputs.path }}/
+          retention-days: 90
+
+      - name: Upload Bito debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-bito-debug-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.split.outputs.debug_path }}/
           retention-days: 90
