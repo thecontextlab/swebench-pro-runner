@@ -52,10 +52,6 @@ on:
         default: 90
         type: number
 
-concurrency:
-  group: swebench-eval-bito-${{ github.actor }}-${{ inputs.repo }}
-  cancel-in-progress: false
-
 jobs:
   execute:
     runs-on: ubuntu-latest
