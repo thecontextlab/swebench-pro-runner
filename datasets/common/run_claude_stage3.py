@@ -45,13 +45,13 @@ This is an automated benchmark run. You are Stage 3 — the executor. The skill 
 When all workstream specs have been executed and code changes are in the repo, stop. Do not run tests. Do not ask what to do next."""
 
 
-ALLOWED_TOOLS = "Bash,Edit,Read,Write,Grep,Glob,Task,TodoWrite,mcp__mcp-server"
+ALLOWED_TOOLS = "Bash,Edit,Read,Write,Grep,Glob,Task,TodoWrite,mcp__BitoAIArchitect"
 
 
 def build_mcp_config(url: str, token: str) -> str:
-    cfg = {"mcpServers": {"mcp-server": {"type": "http", "url": url}}}
+    cfg = {"mcpServers": {"BitoAIArchitect": {"type": "http", "url": url}}}
     if token:
-        cfg["mcpServers"]["mcp-server"]["headers"] = {"Authorization": f"Bearer {token}"}
+        cfg["mcpServers"]["BitoAIArchitect"]["headers"] = {"Authorization": f"Bearer {token}"}
     return json.dumps(cfg)
 
 

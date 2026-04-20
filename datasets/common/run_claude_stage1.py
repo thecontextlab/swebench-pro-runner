@@ -52,20 +52,20 @@ This is an automated benchmark run. Three separate Claude Code instances handle 
 When the plan is saved to `pipeline_artifacts/implementation-plan.md`, stop. Do not proceed to the next stage."""
 
 
-ALLOWED_TOOLS = "Bash,Edit,Read,Write,Grep,Glob,Task,TodoWrite,mcp__mcp-server"
+ALLOWED_TOOLS = "Bash,Edit,Read,Write,Grep,Glob,Task,TodoWrite,mcp__BitoAIArchitect"
 
 
 def build_mcp_config(url: str, token: str) -> str:
     cfg = {
         "mcpServers": {
-            "mcp-server": {
+            "BitoAIArchitect": {
                 "type": "http",
                 "url": url,
             }
         }
     }
     if token:
-        cfg["mcpServers"]["mcp-server"]["headers"] = {"Authorization": f"Bearer {token}"}
+        cfg["mcpServers"]["BitoAIArchitect"]["headers"] = {"Authorization": f"Bearer {token}"}
     return json.dumps(cfg)
 
 
