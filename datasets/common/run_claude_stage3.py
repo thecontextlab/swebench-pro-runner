@@ -36,6 +36,8 @@ This is an automated benchmark run. You are Stage 3 — the executor. The skill 
 ### Hard rules
 - **No user prompts.** Do not ask the user anything. Run fully autonomously.
 - **Do NOT modify any test file.**
+- **Do NOT read any test file.** Test files have been intentionally withheld from this stage (`*_test.go`, `test_*.py`, `*.test.{ts,tsx,js,jsx}`, `*.spec.*`, `tests/`, `__tests__/`, `__snapshots__/`, `fixtures/`, `testdata/`, `conftest.py`). If a `Read` or `Bash cat` on a test path errors with "no such file," that is expected — do not work around it. Ground your changes in the workstream agent-spec you received.
+- **Do NOT run the test suite.** Do not invoke `go test`, `pytest`, `jest`, `npm test`, etc. The pipeline runs all verification after you exit — your job is only to apply the fix. Tests will literally fail-to-load during this stage because the test files are absent.
 - **Do NOT consult any gold patch.** Work only from the workstream specs and implementation plan.
 - Make the **minimal change** needed to fix the issue. Do not refactor unrelated code.
 - At every skill checkpoint or confirmation prompt, auto-approve and continue.

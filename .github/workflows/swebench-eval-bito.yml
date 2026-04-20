@@ -431,7 +431,20 @@ jobs:
               echo "Stage 2 OK — $WS_COUNT workstream spec(s)"
 
               echo ""
-              echo "=== Step 5.7b: Restore test files for Stage 3 execution ==="
+              echo "=== Stage 3: agent-spec-executor (tests still hidden) ==="
+              set +e
+              python3 /run_stage3.py 2>&1 | tee /results/stage3.log
+              STAGE3_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Stage 3 exit: $STAGE3_EXIT"
+
+              echo ""
+              echo "=== Step 5.7b: Restore test files (post Stage 3, pre-verify) ==="
+              # Tests were kept hidden through Stage 3 so the executor cannot
+              # oracle-shortcut the fix (was observed reading cpe_test.go on its
+              # first 4 tool calls in the pre-hardening trace). Restore them now
+              # so git diff, post-verify F2P and post-verify P2P can all see
+              # the real test files.
               RESTORED=0
               while IFS= read -r p; do
                 [ -z "$p" ] && continue
@@ -444,15 +457,7 @@ jobs:
                   RESTORED=$((RESTORED+1))
                 fi
               done < /tmp/oracle-paths.txt
-              echo "Restored $RESTORED test paths for Stage 3"
-
-              echo ""
-              echo "=== Stage 3: agent-spec-executor ==="
-              set +e
-              python3 /run_stage3.py 2>&1 | tee /results/stage3.log
-              STAGE3_EXIT=${PIPESTATUS[0]}
-              set -e
-              echo "Stage 3 exit: $STAGE3_EXIT"
+              echo "Restored $RESTORED test paths"
 
               echo ""
               echo "=== Creating patch file ==="
