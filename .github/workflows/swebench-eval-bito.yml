@@ -320,6 +320,17 @@ jobs:
               cp /opt/bito/CLAUDE.md /testbed/CLAUDE.md
               echo "Wrote /testbed/CLAUDE.md ($(wc -c < /testbed/CLAUDE.md) bytes)"
 
+              # Audit capture: copy key inputs to /results so they survive in the
+              # uploaded artifact. Reviewers can diff these against the source files
+              # in the repo to confirm the pipeline ran with the intended content.
+              mkdir -p /results/audit
+              cp /testbed/CLAUDE.md /results/audit/CLAUDE.md
+              cp /instruction.txt /results/audit/instruction.txt
+              echo "=== CLAUDE.md head (proof of Bito guidelines) ==="
+              head -20 /testbed/CLAUDE.md
+              echo "=== BitoAIArchitect mentions in CLAUDE.md ==="
+              grep -n -i "bitoaiarchitect\|bito architect\|call first" /testbed/CLAUDE.md | head -5
+
               mkdir -p /testbed/pipeline_artifacts
 
               echo ""

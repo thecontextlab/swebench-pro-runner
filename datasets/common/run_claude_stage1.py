@@ -84,6 +84,18 @@ def main() -> int:
 
     prompt = STAGE_PROMPT.replace("{PROBLEM_STATEMENT}", problem)
 
+    # Audit capture: dump the resolved prompt so reviewers can verify exactly
+    # what Claude received — including the BitoAIArchitect instructions and
+    # the substituted problem statement.
+    os.makedirs("/results/audit", exist_ok=True)
+    with open("/results/audit/stage1_prompt.md", "w") as f:
+        f.write(prompt)
+    if "BitoAIArchitect" not in prompt:
+        print("[stage1] ERROR: resolved prompt missing BitoAIArchitect mention", file=sys.stderr)
+        return 4
+    print(f"[stage1] resolved prompt written to /results/audit/stage1_prompt.md "
+          f"({len(prompt)} chars; contains BitoAIArchitect: yes)")
+
     cmd = [
         "claude", "--print",
         "--permission-mode", "acceptEdits",

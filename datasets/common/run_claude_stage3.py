@@ -79,6 +79,15 @@ def main() -> int:
         print("[stage3] ERROR: MCP_URL is required (BitoAIArchitect)", file=sys.stderr)
         return 2
 
+    os.makedirs("/results/audit", exist_ok=True)
+    with open("/results/audit/stage3_prompt.md", "w") as f:
+        f.write(STAGE_PROMPT)
+    if "BitoAIArchitect" not in STAGE_PROMPT:
+        print("[stage3] ERROR: prompt missing BitoAIArchitect mention", file=sys.stderr)
+        return 4
+    print(f"[stage3] resolved prompt written to /results/audit/stage3_prompt.md "
+          f"({len(STAGE_PROMPT)} chars; contains BitoAIArchitect: yes)")
+
     cmd = [
         "claude", "--print",
         "--permission-mode", "acceptEdits",
