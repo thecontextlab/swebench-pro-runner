@@ -16,9 +16,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     node --version && npm --version
 
 # Install multi-agent CLI tools (CRITICAL for A/B testing)
-# Claude Code CLI (already installed but verify)
-RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
-    claude --version || echo "Claude CLI installed"
+# Claude Code CLI — pinned at 2.1.114 (the version that successfully runs the
+# Bito 3-stage pipeline's --effort / --mcp-config features). We remove any
+# stale claude binary first because the base image may have a pre-installed
+# shim at /usr/local/bin/claude that shadows the npm-global prefix, which
+# would make runtime `npm install -g @anthropic-ai/claude-code@latest` a no-op
+# from PATH's perspective (observed: 2.0.75 "upgrade" returned 2.0.75 again).
+RUN rm -f /usr/local/bin/claude /usr/bin/claude && \
+    npm install -g @anthropic-ai/claude-code@2.1.114 && \
+    hash -r && \
+    claude --version && \
+    claude --version | grep -q "2.1.114" || { echo "ERROR: claude CLI not at 2.1.114 after install (got: $(claude --version))"; exit 1; }
 
 # OpenAI Codex CLI
 RUN npm install -g @openai/codex@0.101.0 && \

@@ -143,8 +143,18 @@ if (typeof globalThis.TextDecoder === "undefined") globalThis.TextDecoder = Text
     > /opt/textencoder-polyfill.js
 
 # Install multi-agent CLI tools
-RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
-    claude --version || echo "Claude CLI installed"
+# Claude Code CLI — pinned at 2.1.114 (the version that successfully runs the
+# Bito 3-stage pipeline's --effort / --mcp-config features). We remove any
+# stale claude binary first because the base image may have a pre-installed
+# shim at /usr/local/bin/claude that shadows the npm-global prefix, which
+# would make runtime `npm install -g @anthropic-ai/claude-code@latest` a no-op
+# from PATH's perspective (observed: 2.1.38 "upgrade" returned 2.1.38 again
+# and MCP HTTP-with-bearer handshake returned status:"failed").
+RUN rm -f /usr/local/bin/claude /usr/bin/claude && \
+    npm install -g @anthropic-ai/claude-code@2.1.114 && \
+    hash -r && \
+    claude --version && \
+    claude --version | grep -q "2.1.114" || { echo "ERROR: claude CLI not at 2.1.114 after install (got: $(claude --version))"; exit 1; }
 
 RUN npm install -g @openai/codex@0.101.0 && \
     codex --version || echo "Codex CLI installed"
