@@ -17,8 +17,8 @@ agent:
 
 # MCP server for A/B testing
 mcp:
-  url: # MCP server URL (configure your own)
-  description: "MCP server - indexed openlibrary codebase"
+  url: https://mcp.bito.ai/982268/mcp
+  description: "BitoAIArchitect MCP server - cross-repo codebase intelligence"
 
 # Task group configurations based on SWE-bench_Pro-os investigation
 task_groups:

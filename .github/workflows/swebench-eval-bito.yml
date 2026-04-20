@@ -1,0 +1,505 @@
+name: SWE-bench Bito 3-Stage Evaluation
+
+run-name: "bito | ${{ inputs.repo }} | ${{ inputs.task }} | ${{ inputs.model }} | effort:${{ inputs.effort }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repository'
+        required: true
+        type: choice
+        options:
+          - openlibrary
+          - teleport
+          - tutanota
+          - webclients
+          - vuls
+      task:
+        description: 'Task ID (full YAML filename without .yaml)'
+        required: true
+        type: string
+      model:
+        description: 'Claude model'
+        required: false
+        default: 'claude-opus-4-7'
+        type: choice
+        options:
+          - claude-opus-4-7
+          - claude-opus-4-6
+      effort:
+        description: 'Claude --effort level (session-scoped, passed to CLI)'
+        required: false
+        default: 'xhigh'
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+      anthropic_api_key:
+        description: 'Anthropic API key (optional, falls back to ANTHROPIC_API_KEY secret)'
+        required: false
+        type: string
+      timeout_minutes:
+        description: 'Job timeout in minutes'
+        required: false
+        default: 120
+        type: number
+      agent_timeout_minutes:
+        description: 'Total 3-stage agent timeout in minutes'
+        required: false
+        default: 90
+        type: number
+
+concurrency:
+  group: swebench-eval-bito-${{ github.actor }}-${{ inputs.repo }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) || 120 }}
+
+    steps:
+      - name: Checkout eval-runner
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Load task configuration
+        id: task
+        run: |
+          TASK_FILE="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.yaml"
+          if [ ! -f "$TASK_FILE" ]; then
+            echo "ERROR: Task file not found: $TASK_FILE"
+            ls datasets/${{ inputs.repo }}/tasks/ | head -10
+            exit 1
+          fi
+          echo "task_file=$TASK_FILE" >> $GITHUB_OUTPUT
+
+          REPO_URL=$(yq '.repo_url' "$TASK_FILE")
+          echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+
+          yq '.swebench.before_repo_set_cmd' "$TASK_FILE" > /tmp/before_repo_set_cmd.txt
+          yq '.instruction' "$TASK_FILE" > /tmp/instruction.txt
+          yq '.swebench.fail_to_pass[]' "$TASK_FILE" > /tmp/fail_to_pass.txt
+
+          python3 -c "
+          import yaml
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          p2p = data.get('swebench', {}).get('pass_to_pass', []) or []
+          with open('/tmp/pass_to_pass.txt', 'w') as out:
+              for t in p2p:
+                  out.write(str(t) + '\n')
+          print(f'pass_to_pass: {len(p2p)} tests')
+          "
+
+          SETUP_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.setup.sh"
+          if [ -f "$SETUP_SCRIPT" ]; then
+            echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
+          else
+            echo "setup_script=" >> $GITHUB_OUTPUT
+          fi
+
+          RUN_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.run_script.sh"
+          if [ ! -f "$RUN_SCRIPT" ]; then
+            echo "ERROR: run_script.sh missing: $RUN_SCRIPT"
+            exit 1
+          fi
+          echo "run_script=$RUN_SCRIPT" >> $GITHUB_OUTPUT
+
+      - name: Resolve Docker image + MCP
+        id: config
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+          CONFIG_OUTPUT=$(python3 datasets/common/config_loader.py "${{ inputs.repo }}" "${{ inputs.task }}" "true")
+          echo "$CONFIG_OUTPUT" >> $GITHUB_OUTPUT
+
+          AR_IMAGE=$(echo "$CONFIG_OUTPUT" | grep "^ar_image=" | cut -d'=' -f2-)
+          MCP_URL=$(echo "$CONFIG_OUTPUT" | grep "^mcp_url=" | cut -d'=' -f2-)
+          echo "Image:   $AR_IMAGE"
+          echo "MCP URL: ${MCP_URL:-(empty — BitoAIArchitect requires a URL)}"
+          if [ -z "$MCP_URL" ]; then
+            echo "ERROR: MCP URL is empty. The Bito pipeline requires BitoAIArchitect MCP."
+            echo "Set mcp.url in datasets/${{ inputs.repo }}/config.yaml."
+            exit 1
+          fi
+
+      - name: Unzip Bito skills
+        run: |
+          if [ ! -f SKILLS.zip ]; then
+            echo "ERROR: SKILLS.zip missing at repo root"
+            exit 1
+          fi
+          rm -rf SKILLS
+          unzip -q SKILLS.zip
+          echo "Unzipped skills:"
+          ls SKILLS/
+          SKILL_COUNT=$(find SKILLS -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+          echo "Skill count: $SKILL_COUNT"
+          if [ "$SKILL_COUNT" -lt 12 ]; then
+            echo "ERROR: expected >=12 skill dirs, found $SKILL_COUNT"
+            exit 1
+          fi
+
+      - name: Setup unique results directory
+        id: results
+        run: |
+          UNIQUE_DIR="results-${{ github.run_id }}-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          UNIQUE_PATH="${{ github.workspace }}/${UNIQUE_DIR}"
+          echo "dir=${UNIQUE_DIR}" >> $GITHUB_OUTPUT
+          echo "path=${UNIQUE_PATH}" >> $GITHUB_OUTPUT
+          mkdir -p "${UNIQUE_PATH}"
+
+      - name: Docker login + pull image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker pull ${{ steps.config.outputs.ar_image }}
+
+      - name: Resolve API key
+        id: apikey
+        run: |
+          if [ -n "${{ inputs.anthropic_api_key }}" ]; then
+            echo "::add-mask::${{ inputs.anthropic_api_key }}"
+            echo "anthropic_key=${{ inputs.anthropic_api_key }}" >> $GITHUB_OUTPUT
+          else
+            echo "anthropic_key=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Bito skills visible inside container
+        run: |
+          EXPECTED_SKILLS=(
+            bito-scope-to-plan
+            bito-plan-to-agent-spec
+            bito-agent-spec-executor
+            bito-production-triage
+            bito-codebase-explorer
+            bito-spike
+            bito-epic-to-plan
+            bito-feature-plan
+            bito-commit-review
+            bito-feasibility
+            bito-trd
+            bito-prd
+          )
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ github.workspace }}/SKILLS:/root/.claude/skills:ro \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+              echo "=== Skills directory listing ==="
+              ls -la /root/.claude/skills/
+              echo ""
+              echo "=== Per-skill SKILL.md check ==="
+              MISSING=()
+              for s in '"${EXPECTED_SKILLS[*]}"'; do
+                if [ -f "/root/.claude/skills/$s/SKILL.md" ]; then
+                  echo "  OK  $s"
+                else
+                  echo "  MISS $s"
+                  MISSING+=("$s")
+                fi
+              done
+              if [ ${#MISSING[@]} -gt 0 ]; then
+                echo "ERROR: ${#MISSING[@]} skills missing: ${MISSING[*]}"
+                exit 1
+              fi
+              echo ""
+              echo "=== claude CLI present ==="
+              which claude || { echo "ERROR: claude CLI not in PATH"; exit 1; }
+              claude --version || true
+            '
+
+      - name: Run 3-stage Bito pipeline
+        id: run
+        timeout-minutes: ${{ fromJSON(inputs.agent_timeout_minutes) || 90 }}
+        run: |
+          cp /tmp/before_repo_set_cmd.txt ${{ github.workspace }}/before_repo_set_cmd.txt
+          cp /tmp/instruction.txt ${{ github.workspace }}/instruction.txt
+          cp /tmp/fail_to_pass.txt ${{ github.workspace }}/fail_to_pass.txt
+          cp /tmp/pass_to_pass.txt ${{ github.workspace }}/pass_to_pass.txt
+          cp "${{ steps.task.outputs.run_script }}" ${{ github.workspace }}/run_script.sh
+
+          SETUP_SCRIPT="${{ steps.task.outputs.setup_script }}"
+          if [ -n "$SETUP_SCRIPT" ] && [ -f "$SETUP_SCRIPT" ]; then
+            cp "$SETUP_SCRIPT" ${{ github.workspace }}/setup.sh
+          else
+            echo '#!/bin/bash' > ${{ github.workspace }}/setup.sh
+            echo 'echo "WARNING: no setup.sh"' >> ${{ github.workspace }}/setup.sh
+          fi
+
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ steps.results.outputs.path }}:/results \
+            -v ${{ github.workspace }}/SKILLS:/root/.claude/skills:ro \
+            -v ${{ github.workspace }}/BitoAIArchitectGuidelines.md:/opt/bito/CLAUDE.md:ro \
+            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt:ro \
+            -v ${{ github.workspace }}/instruction.txt:/instruction.txt:ro \
+            -v ${{ github.workspace }}/fail_to_pass.txt:/fail_to_pass.txt:ro \
+            -v ${{ github.workspace }}/pass_to_pass.txt:/pass_to_pass.txt:ro \
+            -v ${{ github.workspace }}/run_script.sh:/run_script.sh \
+            -v ${{ github.workspace }}/setup.sh:/setup.sh \
+            -v ${{ github.workspace }}/datasets/common/run_claude_stage1.py:/run_stage1.py:ro \
+            -v ${{ github.workspace }}/datasets/common/run_claude_stage2.py:/run_stage2.py:ro \
+            -v ${{ github.workspace }}/datasets/common/run_claude_stage3.py:/run_stage3.py:ro \
+            -e ANTHROPIC_API_KEY=${{ steps.apikey.outputs.anthropic_key }} \
+            -e MODEL=${{ inputs.model }} \
+            -e EFFORT=${{ inputs.effort }} \
+            -e TASK_ID="${{ inputs.task }}" \
+            -e REPO_URL="${{ steps.task.outputs.repo_url }}" \
+            -e MCP_URL="${{ steps.config.outputs.mcp_url }}" \
+            -e MCP_TOKEN="${{ secrets.MCP_TOKEN }}" \
+            -e CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT=1 \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+
+              echo "=== Step 1: Clone repository ==="
+              if [ ! -d "/testbed/.git" ]; then
+                git clone "$REPO_URL" /testbed
+              fi
+              cd /testbed
+
+              echo ""
+              echo "=== Step 2: before_repo_set_cmd ==="
+              while IFS= read -r cmd || [ -n "$cmd" ]; do
+                if [ -n "$cmd" ]; then
+                  echo "Running: $cmd"
+                  eval "$cmd" || echo "Warning: command failed (may be expected)"
+                fi
+              done < /before_repo_set_cmd.txt
+
+              echo ""
+              echo "=== Step 3: setup.sh ==="
+              chmod +x /setup.sh
+              source /setup.sh
+
+              echo ""
+              echo "=== Step 4: Pre-verify F2P (should fail) ==="
+              mapfile -t FAIL_TO_PASS < /fail_to_pass.txt
+              chmod +x /run_script.sh
+              set +e
+              VERIFICATION_PHASE=pre /run_script.sh "${FAIL_TO_PASS[@]}" > /results/pre_verification.log 2>&1
+              PRE_F2P_EXIT=$?
+              set -e
+              echo "F2P pre exit: $PRE_F2P_EXIT (nonzero expected)"
+
+              echo ""
+              echo "=== Step 4b: Pre-verify P2P (should pass) ==="
+              mapfile -t PASS_TO_PASS < /pass_to_pass.txt
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=pre /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_pre_verification.log 2>&1
+                P2P_PRE_EXIT=$?
+                set -e
+                echo "P2P pre exit: $P2P_PRE_EXIT"
+              else
+                echo "No pass_to_pass tests." > /results/p2p_pre_verification.log
+                P2P_PRE_EXIT=0
+              fi
+              echo "$P2P_PRE_EXIT" > /results/.p2p_pre_exit
+
+              echo ""
+              echo "=== Step 5: Install CLAUDE.md in /testbed ==="
+              cp /opt/bito/CLAUDE.md /testbed/CLAUDE.md
+              echo "Wrote /testbed/CLAUDE.md ($(wc -c < /testbed/CLAUDE.md) bytes)"
+
+              mkdir -p /testbed/pipeline_artifacts
+
+              echo ""
+              echo "=== Stage 1: scope-to-plan ==="
+              set +e
+              python3 /run_stage1.py 2>&1 | tee /results/stage1.log
+              STAGE1_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Stage 1 exit: $STAGE1_EXIT"
+              if [ ! -s /testbed/pipeline_artifacts/implementation-plan.md ]; then
+                echo "ERROR: Stage 1 did not produce implementation-plan.md"
+                exit 10
+              fi
+              echo "Stage 1 OK — plan size: $(wc -c < /testbed/pipeline_artifacts/implementation-plan.md) bytes"
+
+              echo ""
+              echo "=== Stage 2: plan-to-agent-spec ==="
+              set +e
+              python3 /run_stage2.py 2>&1 | tee /results/stage2.log
+              STAGE2_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Stage 2 exit: $STAGE2_EXIT"
+              if [ ! -s /testbed/pipeline_artifacts/swebench-execution-manifest.md ]; then
+                echo "ERROR: Stage 2 did not produce swebench-execution-manifest.md"
+                exit 20
+              fi
+              WS_COUNT=$(ls /testbed/pipeline_artifacts/swebench-ws*.agent-spec.md 2>/dev/null | wc -l | tr -d " ")
+              if [ "$WS_COUNT" -lt 1 ]; then
+                echo "ERROR: Stage 2 produced no workstream spec files"
+                exit 21
+              fi
+              echo "Stage 2 OK — $WS_COUNT workstream spec(s)"
+
+              echo ""
+              echo "=== Stage 3: agent-spec-executor ==="
+              set +e
+              python3 /run_stage3.py 2>&1 | tee /results/stage3.log
+              STAGE3_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Stage 3 exit: $STAGE3_EXIT"
+
+              echo ""
+              echo "=== Creating patch file ==="
+              cd /testbed
+              git status --short
+              git diff > /results/changes.patch
+              PATCH_SIZE=$(stat -c%s /results/changes.patch)
+              echo "Patch size: $PATCH_SIZE bytes"
+
+              echo ""
+              echo "=== Copy pipeline artifacts to /results ==="
+              cp -r /testbed/pipeline_artifacts /results/pipeline_artifacts
+              ls -la /results/pipeline_artifacts/
+
+              echo ""
+              echo "=== Post-verify F2P ==="
+              set +e
+              VERIFICATION_PHASE=post /run_script.sh "${FAIL_TO_PASS[@]}" > /results/verification.log 2>&1
+              VERIFY_EXIT=$?
+              set -e
+              echo "F2P post exit: $VERIFY_EXIT"
+              cat /results/verification.log
+
+              echo ""
+              echo "=== Post-verify P2P ==="
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=post /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_verification.log 2>&1
+                P2P_POST_EXIT=$?
+                set -e
+                echo "P2P post exit: $P2P_POST_EXIT"
+              else
+                echo "No pass_to_pass tests." > /results/p2p_verification.log
+                P2P_POST_EXIT=0
+              fi
+              echo "$P2P_POST_EXIT" > /results/.p2p_post_exit
+
+              if [ $VERIFY_EXIT -eq 0 ]; then
+                STATUS="success"
+              else
+                STATUS="failed"
+              fi
+
+              cat > /results/result.json << RESULT_EOF
+          {
+            "task": "$TASK_ID",
+            "status": "$STATUS",
+            "model": "$MODEL",
+            "effort": "$EFFORT",
+            "mcp_enabled": true,
+            "pipeline": "bito-3-stage",
+            "stage1_exit_code": $STAGE1_EXIT,
+            "stage2_exit_code": $STAGE2_EXIT,
+            "stage3_exit_code": $STAGE3_EXIT,
+            "verification_exit_code": $VERIFY_EXIT,
+            "p2p_pre_exit_code": $P2P_PRE_EXIT,
+            "p2p_post_exit_code": $P2P_POST_EXIT,
+            "workstream_count": $WS_COUNT,
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          RESULT_EOF
+
+              echo "$STAGE3_EXIT" > /results/.agent_exit
+              echo "$VERIFY_EXIT" > /results/.verify_exit
+              ls -la /results/
+              exit $VERIFY_EXIT
+            '
+        continue-on-error: true
+
+      - name: Extract enhanced metrics
+        if: always()
+        env:
+          TASK_ID: ${{ inputs.task }}
+          MODEL: ${{ inputs.model }}
+          REPO_NAME: ${{ inputs.repo }}
+          FAIL_TO_PASS_FILE: ${{ github.workspace }}/fail_to_pass.txt
+          PASS_TO_PASS_FILE: ${{ github.workspace }}/pass_to_pass.txt
+        run: |
+          cd ${{ github.workspace }}
+          AGENT_EXIT=$(cat ${{ steps.results.outputs.path }}/.agent_exit 2>/dev/null || echo "1")
+          VERIFY_EXIT=$(cat ${{ steps.results.outputs.path }}/.verify_exit 2>/dev/null || echo "1")
+
+          if [ -f "datasets/${{ inputs.repo }}/extract_metrics.py" ]; then
+            # Run extractor — it writes result.json. For the Bito pipeline, it may
+            # not understand the multi-stage logs yet; the in-container result.json
+            # already has the essential per-stage exit codes.
+            RESULTS_DIR="${{ steps.results.outputs.path }}" \
+            AGENT_EXIT_CODE="$AGENT_EXIT" \
+            VERIFY_EXIT_CODE="$VERIFY_EXIT" \
+            TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            python3 datasets/${{ inputs.repo }}/extract_metrics.py || \
+              echo "WARN: extract_metrics.py failed; keeping in-container result.json"
+          fi
+
+      - name: Generate summary
+        if: always()
+        run: |
+          RESULT_FILE="${{ steps.results.outputs.path }}/result.json"
+          echo "# Bito 3-Stage Evaluation Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$RESULT_FILE" ]; then
+            STATUS=$(jq -r '.status // "unknown"' "$RESULT_FILE")
+            S1=$(jq -r '.stage1_exit_code // "-"' "$RESULT_FILE")
+            S2=$(jq -r '.stage2_exit_code // "-"' "$RESULT_FILE")
+            S3=$(jq -r '.stage3_exit_code // "-"' "$RESULT_FILE")
+            VE=$(jq -r '.verification_exit_code // "-"' "$RESULT_FILE")
+            WS=$(jq -r '.workstream_count // "-"' "$RESULT_FILE")
+
+            if [ "$STATUS" = "success" ]; then
+              echo "## Result: **RESOLVED** :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## Result: **UNRESOLVED** :x:" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Task | \`${{ inputs.task }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Repo | ${{ inputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Model | ${{ inputs.model }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Effort | ${{ inputs.effort }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Stage 1 exit | $S1 |" >> $GITHUB_STEP_SUMMARY
+            echo "| Stage 2 exit | $S2 |" >> $GITHUB_STEP_SUMMARY
+            echo "| Stage 3 exit | $S3 |" >> $GITHUB_STEP_SUMMARY
+            echo "| Workstreams | $WS |" >> $GITHUB_STEP_SUMMARY
+            echo "| F2P verify exit | $VE |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Result: **error** (no result file)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Scrub API keys from artifacts
+        if: always()
+        run: |
+          RESULTS_DIR="${{ steps.results.outputs.path }}"
+          if [ -d "$RESULTS_DIR" ]; then
+            for LOG_FILE in "$RESULTS_DIR"/agent.log "$RESULTS_DIR"/*.log; do
+              [ -f "$LOG_FILE" ] || continue
+              sed -i 's/sk-ant-[A-Za-z0-9_-]\{20,\}/[REDACTED_ANTHROPIC_KEY]/g' "$LOG_FILE"
+              sed -i 's/ANTHROPIC_API_KEY=[^ ]*/ANTHROPIC_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              # MCP bearer tokens
+              sed -i 's/Bearer [A-Za-z0-9_-]\{8,\}/Bearer [REDACTED]/g' "$LOG_FILE"
+              sed -i 's/MCP_TOKEN=[^ ]*/MCP_TOKEN=[REDACTED]/g' "$LOG_FILE"
+            done
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-bito-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.results.outputs.path }}/
+          retention-days: 90
