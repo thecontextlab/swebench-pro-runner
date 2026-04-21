@@ -401,7 +401,21 @@ jobs:
                 p="${p#./}"
                 git -C /testbed rm --cached -f --quiet -- "$p" 2>/dev/null || true
               done < /tmp/oracle-paths.txt
-              echo "Hid $HIDDEN test paths from /testbed (working tree + git index) for stages 1-2"
+              # Close the last oracle channel: "git show HEAD:<path>". Record
+              # the original HEAD so we can restore it before post-verify, then
+              # commit the index removal. HEAD then points at a tree with no
+              # test files, so the agent cannot extract test content through
+              # the HEAD reference either.
+              git -C /testbed rev-parse HEAD > /tmp/oracle-orig-head.txt
+              git -C /testbed \
+                  -c user.email=oracle-hide@local \
+                  -c user.name=oracle-hide \
+                  commit --no-verify --quiet --allow-empty \
+                  -m "[internal] hide test files during planning stages" 2>/dev/null || true
+              # Expire reflog so the original HEAD is not trivially discoverable
+              # via "git reflog" or "git log --walk-reflogs".
+              git -C /testbed reflog expire --expire=all --all 2>/dev/null || true
+              echo "Hid $HIDDEN test paths from /testbed (working tree + index + HEAD tree) for stages 1-2"
               # Audit evidence: what we hid so reviewers can verify this ran.
               cp /tmp/oracle-paths.txt /results/audit/oracle_hidden_paths.txt 2>/dev/null || true
 
@@ -451,6 +465,16 @@ jobs:
               # first 4 tool calls in the pre-hardening trace). Restore them now
               # so git diff, post-verify F2P and post-verify P2P can all see
               # the real test files.
+
+              # Move HEAD back to the pre-hide commit so "git diff HEAD" and
+              # the post-verify steps see the intended tree. --soft keeps the
+              # working tree and index as they are (preserving stage-3 edits).
+              ORIG_HEAD=$(cat /tmp/oracle-orig-head.txt 2>/dev/null)
+              if [ -n "$ORIG_HEAD" ]; then
+                git -C /testbed reset --soft "$ORIG_HEAD" --quiet 2>/dev/null || true
+                echo "HEAD reset to original: $ORIG_HEAD"
+              fi
+
               RESTORED=0
               while IFS= read -r p; do
                 [ -z "$p" ] && continue
