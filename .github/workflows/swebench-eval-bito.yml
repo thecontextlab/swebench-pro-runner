@@ -393,7 +393,15 @@ jobs:
                   HIDDEN=$((HIDDEN+1))
                 fi
               done < /tmp/oracle-paths.txt
-              echo "Hid $HIDDEN test paths from /testbed for stages 1-2"
+              # Also remove from the git index so "git show :<path>" and
+              # "git diff --cached -- <path>" cannot be used to reach the
+              # test content through git history.
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                git -C /testbed rm --cached -f --quiet -- "$p" 2>/dev/null || true
+              done < /tmp/oracle-paths.txt
+              echo "Hid $HIDDEN test paths from /testbed (working tree + git index) for stages 1-2"
               # Audit evidence: what we hid so reviewers can verify this ran.
               cp /tmp/oracle-paths.txt /results/audit/oracle_hidden_paths.txt 2>/dev/null || true
 
@@ -455,7 +463,14 @@ jobs:
                   RESTORED=$((RESTORED+1))
                 fi
               done < /tmp/oracle-paths.txt
-              echo "Restored $RESTORED test paths"
+              # Re-stage restored paths into the git index so post-verify
+              # and "git diff > changes.patch" see the intended repo state.
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                [ -e "/testbed/$p" ] && git -C /testbed add --force --quiet -- "$p" 2>/dev/null || true
+              done < /tmp/oracle-paths.txt
+              echo "Restored $RESTORED test paths (working tree + git index)"
 
               echo ""
               echo "=== Creating patch file ==="
