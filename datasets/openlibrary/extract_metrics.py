@@ -630,20 +630,32 @@ def parse_trajectory(agent_log_path: str) -> dict:
                             }
                         })
 
-        # Extract final result metrics
+        # Extract final result metrics.
+        # In the Bito 3-stage pipeline, agent.log is the CONCATENATION of
+        # stage1/stage2/stage3 JSONL logs, so we see THREE 'result' events
+        # in order: scope-to-plan, plan-to-agent-spec, agent-spec-executor.
+        # Accumulate across all three so result.json reflects total cost,
+        # duration, token usage, and turn count for the full run.
         if event_type == "result":
-            metrics["duration_seconds"] = entry.get("duration_ms", 0) / 1000
-            metrics["duration_api_seconds"] = entry.get("duration_api_ms", 0) / 1000
-            metrics["total_cost_usd"] = entry.get("total_cost_usd", 0)
-            metrics["num_turns"] = entry.get("num_turns", 0)
+            metrics["duration_seconds"] += entry.get("duration_ms", 0) / 1000
+            metrics["duration_api_seconds"] += entry.get("duration_api_ms", 0) / 1000
+            metrics["total_cost_usd"] += entry.get("total_cost_usd", 0)
+            metrics["num_turns"] += entry.get("num_turns", 0)
 
             usage = entry.get("usage", {})
-            metrics["tokens"]["input"] = usage.get("input_tokens", 0)
-            metrics["tokens"]["output"] = usage.get("output_tokens", 0)
-            metrics["tokens"]["cache_read"] = usage.get("cache_read_input_tokens", 0)
-            metrics["tokens"]["cache_creation"] = usage.get("cache_creation_input_tokens", 0)
+            metrics["tokens"]["input"] += usage.get("input_tokens", 0)
+            metrics["tokens"]["output"] += usage.get("output_tokens", 0)
+            metrics["tokens"]["cache_read"] += usage.get("cache_read_input_tokens", 0)
+            metrics["tokens"]["cache_creation"] += usage.get("cache_creation_input_tokens", 0)
 
-            metrics["model_usage"] = entry.get("modelUsage", {})
+            # Merge modelUsage across stages (sum numeric fields, keep last string fields).
+            for _mu_model, _mu_data in (entry.get("modelUsage") or {}).items():
+                _existing = metrics["model_usage"].setdefault(_mu_model, {})
+                for _k, _v in _mu_data.items():
+                    if isinstance(_v, (int, float)):
+                        _existing[_k] = _existing.get(_k, 0) + _v
+                    else:
+                        _existing[_k] = _v
 
     # Fallback: if no 'result' entry, reconstruct from accumulated assistant messages
     if metrics["num_turns"] == 0 and metrics.get("_acc_turns", 0) > 0:
