@@ -235,7 +235,7 @@ jobs:
             -v ${{ steps.results.outputs.path }}:/results \
             -v ${{ github.workspace }}/SKILLS:/root/.claude/skills:ro \
             -v ${{ github.workspace }}/BitoAIArchitectGuidelines.md:/opt/bito/CLAUDE.md:ro \
-            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt \
+            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt:ro \
             -v ${{ github.workspace }}/instruction.txt:/instruction.txt:ro \
             -v ${{ github.workspace }}/fail_to_pass.txt:/fail_to_pass.txt:ro \
             -v ${{ github.workspace }}/pass_to_pass.txt:/pass_to_pass.txt:ro \
@@ -271,20 +271,18 @@ jobs:
                 fi
               done < /before_repo_set_cmd.txt
 
-              # Step 2b: scrub the fix-commit SHA and any unreachable fix-commit
-              # objects. before_repo_set_cmd always contains `git checkout
-              # <fix_sha> -- <test_file>`, which means the fix commit's blobs
-              # sit in /testbed/.git/objects until garbage-collected. An
-              # adversarial agent could `cat /before_repo_set_cmd.txt` to
-              # learn the SHA, then `git show <fix_sha>` to read the gold
-              # patch. Close both holes here.
+              # Step 2b: make the fix commit unreachable so `git show <fix_sha>`
+              # returns "bad object" even if an agent reads /before_repo_set_cmd.txt
+              # and extracts the SHA. The mounted file itself stays read-only from
+              # the container's perspective (GitHub Actions runners prevent root-in-
+              # container from writing through a bind-mount to a runner-owned file).
+              # That's fine — the fix lives in git objects; if we prune them, the
+              # SHA is a pointer to nothing.
               echo ""
-              echo "=== Step 2b: Scrub fix-commit leakage ==="
-              : > /before_repo_set_cmd.txt
-              echo "Truncated /before_repo_set_cmd.txt"
+              echo "=== Step 2b: Prune fix-commit objects ==="
               cd /testbed
-              # Drop any named refs pointing at non-HEAD commits (some Dockerfiles
-              # create refs/swebench/<sha> during image build — webclients does).
+              # Drop any named refs pointing at non-HEAD commits (webclients'
+              # Dockerfile creates refs/swebench/<sha> during image build).
               git for-each-ref --format='%(refname)' 'refs/swebench/*' 2>/dev/null | while read ref; do
                 git update-ref -d "$ref" 2>/dev/null || true
               done
