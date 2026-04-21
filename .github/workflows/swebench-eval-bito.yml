@@ -289,7 +289,7 @@ jobs:
               git reflog expire --expire=all --all 2>/dev/null || true
               git gc --prune=now 2>/dev/null || true
               echo "git objects pruned; fix commit should no longer resolve via git show"
-              cd -
+              # Stay in /testbed — subsequent steps (setup.sh, tests, stages) expect it.
 
               echo ""
               echo "=== Step 3: setup.sh ==="
