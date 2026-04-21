@@ -12,7 +12,13 @@ import os
 import subprocess
 import sys
 
-STAGE_PROMPT = """You are running Stage 2 of a 3-stage Bito pipeline for solving a SWE-Bench Pro task. Stage 1 (a different Claude Code instance) already produced a technical implementation plan. Your job is to transform that plan into workstream agent specs using the `/bito-plan-to-agent-spec` skill.
+STAGE_PROMPT = """You are running Stage 2 of a 3-stage Bito pipeline for solving the task described below.
+
+<PROBLEM_STATEMENT>
+{PROBLEM_STATEMENT}
+</PROBLEM_STATEMENT>
+
+Stage 1 (a different Claude Code instance) already produced a technical implementation plan grounded in that problem statement. Your job is to transform that plan into workstream agent specs using the `/bito-plan-to-agent-spec` skill.
 
 ### Context
 This is an automated benchmark run. You are Stage 2. Your input is the plan from Stage 1 on disk. Your outputs — the agent spec files and execution manifest — will be consumed by Stage 3 (running `/bito-agent-spec-executor`) in a separate instance.
@@ -59,6 +65,9 @@ def main() -> int:
         print(f"[stage2] ERROR: Stage 1 output missing or empty: {plan_path}", file=sys.stderr)
         return 2
 
+    with open("/instruction.txt") as f:
+        problem = f.read().strip()
+
     model = os.environ.get("MODEL", "claude-opus-4-7")
     effort = os.environ.get("EFFORT", "high")
     mcp_url = os.environ.get("MCP_URL", "")
@@ -68,20 +77,22 @@ def main() -> int:
         print("[stage2] ERROR: MCP_URL is required (BitoAIArchitect)", file=sys.stderr)
         return 2
 
+    prompt = STAGE_PROMPT.replace("{PROBLEM_STATEMENT}", problem)
+
     os.makedirs("/results/audit", exist_ok=True)
     with open("/results/audit/stage2_prompt.md", "w") as f:
-        f.write(STAGE_PROMPT)
-    if "BitoAIArchitect" not in STAGE_PROMPT:
-        print("[stage2] ERROR: prompt missing BitoAIArchitect mention", file=sys.stderr)
+        f.write(prompt)
+    if "BitoAIArchitect" not in prompt:
+        print("[stage2] ERROR: resolved prompt missing BitoAIArchitect mention", file=sys.stderr)
         return 4
     print(f"[stage2] resolved prompt written to /results/audit/stage2_prompt.md "
-          f"({len(STAGE_PROMPT)} chars; contains BitoAIArchitect: yes)")
+          f"({len(prompt)} chars; contains BitoAIArchitect: yes)")
 
     cmd = [
         "claude", "--print",
         "--permission-mode", "acceptEdits",
         "--allowedTools", ALLOWED_TOOLS,
-        "-p", STAGE_PROMPT,
+        "-p", prompt,
         "--output-format", "stream-json",
         "--verbose",
         "--model", model,
@@ -93,6 +104,7 @@ def main() -> int:
     env["CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT"] = "1"
 
     print(f"[stage2] model={model} effort={effort} mcp=on task={os.environ.get('TASK_ID', '?')}")
+    print(f"[stage2] problem statement: {len(problem)} chars")
     print(f"[stage2] plan size: {os.path.getsize(plan_path)} bytes")
     print(f"[stage2] launching claude…")
     result = subprocess.run(cmd, cwd="/testbed", env=env)

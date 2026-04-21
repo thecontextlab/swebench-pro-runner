@@ -13,7 +13,13 @@ import os
 import subprocess
 import sys
 
-STAGE_PROMPT = """You are running Stage 3 of a 3-stage Bito pipeline for solving a SWE-Bench Pro task. Stages 1 and 2 (different Claude Code instances) already produced an implementation plan and workstream agent specs. Your job is to execute each agent spec using the `/bito-agent-spec-executor` skill, making actual code changes in the repo.
+STAGE_PROMPT = """You are running Stage 3 of a 3-stage Bito pipeline for solving a task described below.
+
+<PROBLEM_STATEMENT>
+{PROBLEM_STATEMENT}
+</PROBLEM_STATEMENT>
+
+Stages 1 and 2 (different Claude Code instances) already produced an implementation plan and workstream agent specs grounded in that problem statement. Your job is to execute each agent spec using the `/bito-agent-spec-executor` skill, making actual code changes in the repo.
 
 ### Context
 This is an automated benchmark run. You are Stage 3 — the executor. The skill requires TWO inputs per invocation: (1) the original implementation plan and (2) one workstream agent-spec file. Both are in `pipeline_artifacts/`.
@@ -74,6 +80,9 @@ def main() -> int:
         print(f"[stage3] ERROR: no workstream spec files under {artifacts}", file=sys.stderr)
         return 2
 
+    with open("/instruction.txt") as f:
+        problem = f.read().strip()
+
     model = os.environ.get("MODEL", "claude-opus-4-7")
     effort = os.environ.get("EFFORT", "high")
     mcp_url = os.environ.get("MCP_URL", "")
@@ -83,20 +92,22 @@ def main() -> int:
         print("[stage3] ERROR: MCP_URL is required (BitoAIArchitect)", file=sys.stderr)
         return 2
 
+    prompt = STAGE_PROMPT.replace("{PROBLEM_STATEMENT}", problem)
+
     os.makedirs("/results/audit", exist_ok=True)
     with open("/results/audit/stage3_prompt.md", "w") as f:
-        f.write(STAGE_PROMPT)
-    if "BitoAIArchitect" not in STAGE_PROMPT:
-        print("[stage3] ERROR: prompt missing BitoAIArchitect mention", file=sys.stderr)
+        f.write(prompt)
+    if "BitoAIArchitect" not in prompt:
+        print("[stage3] ERROR: resolved prompt missing BitoAIArchitect mention", file=sys.stderr)
         return 4
     print(f"[stage3] resolved prompt written to /results/audit/stage3_prompt.md "
-          f"({len(STAGE_PROMPT)} chars; contains BitoAIArchitect: yes)")
+          f"({len(prompt)} chars; contains BitoAIArchitect: yes)")
 
     cmd = [
         "claude", "--print",
         "--permission-mode", "acceptEdits",
         "--allowedTools", ALLOWED_TOOLS,
-        "-p", STAGE_PROMPT,
+        "-p", prompt,
         "--output-format", "stream-json",
         "--verbose",
         "--model", model,
@@ -108,6 +119,7 @@ def main() -> int:
     env["CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT"] = "1"
 
     print(f"[stage3] model={model} effort={effort} mcp=on task={os.environ.get('TASK_ID', '?')}")
+    print(f"[stage3] problem statement: {len(problem)} chars")
     print(f"[stage3] manifest: {manifest}")
     print(f"[stage3] workstream specs discovered: {len(specs)}")
     for s in specs:
