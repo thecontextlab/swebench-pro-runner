@@ -271,19 +271,19 @@ jobs:
                 fi
               done < /before_repo_set_cmd.txt
 
-              # Step 2b: make the fix commit unreachable so `git show <fix_sha>`
+              # Step 2b: make the fix commit unreachable so "git show <fix_sha>"
               # returns "bad object" even if an agent reads /before_repo_set_cmd.txt
               # and extracts the SHA. The mounted file itself stays read-only from
-              # the container's perspective (GitHub Actions runners prevent root-in-
-              # container from writing through a bind-mount to a runner-owned file).
-              # That's fine — the fix lives in git objects; if we prune them, the
-              # SHA is a pointer to nothing.
+              # the container side (GitHub Actions runners prevent root-in-container
+              # from writing through a bind-mount to a runner-owned file). That is
+              # fine — the fix lives in git objects; if we prune them, the SHA is a
+              # pointer to nothing.
               echo ""
               echo "=== Step 2b: Prune fix-commit objects ==="
               cd /testbed
-              # Drop any named refs pointing at non-HEAD commits (webclients'
+              # Drop any named refs pointing at non-HEAD commits (the webclients
               # Dockerfile creates refs/swebench/<sha> during image build).
-              git for-each-ref --format='%(refname)' 'refs/swebench/*' 2>/dev/null | while read ref; do
+              git for-each-ref --format="%(refname)" "refs/swebench/*" 2>/dev/null | while read ref; do
                 git update-ref -d "$ref" 2>/dev/null || true
               done
               git reflog expire --expire=all --all 2>/dev/null || true
