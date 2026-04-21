@@ -360,27 +360,41 @@ jobs:
               mkdir -p /tmp/oracle-shadow
               cd /testbed
               : > /tmp/oracle-paths.txt
-              find . -type f \( \
-                  -name "*_test.go" -o \
-                  -name "test_*.py" -o \
-                  -name "*_test.py" -o \
-                  -name "conftest.py" -o \
-                  -name "*.test.ts" -o -name "*.test.tsx" -o \
-                  -name "*.test.js" -o -name "*.test.jsx" -o \
-                  -name "*.spec.ts" -o -name "*.spec.tsx" -o \
-                  -name "*.spec.js" -o -name "*.spec.jsx" -o \
-                  -name "*.fixture.*" -o -name "*.fixtures.*" \
-                \) ! -path "./.git/*" >> /tmp/oracle-paths.txt
-              # Test / fixture / mock / snapshot directories at any depth.
-              find . -type d \( \
-                  -name "tests" -o \
-                  -name "__tests__" -o \
-                  -name "__test__" -o \
-                  -name "fixtures" -o \
-                  -name "__mocks__" -o \
-                  -name "__snapshots__" -o \
-                  -name "testdata" \
-                \) ! -path "./.git/*" >> /tmp/oracle-paths.txt || true
+              # Single pass: match test/fixture directories AND prune them, so
+              # any test files inside those directories are NOT collected
+              # separately. If we collected both a parent dir and files inside
+              # it, the file-move would create the target dir, and the later
+              # dir-move would nest (mv src existing-dir => dst/basename), which
+              # broke 178 files in the ol#2 run.
+              find . -path "./.git" -prune \
+                -o \( -type d \( \
+                        -name tests -o -name __tests__ -o -name __test__ -o \
+                        -name fixtures -o -name __mocks__ -o \
+                        -name __snapshots__ -o -name testdata \
+                      \) -prune -print \
+                   \) \
+                -o \( -type f \( \
+                        -name "*_test.go" -o \
+                        -name "test_*.py" -o -name "*_test.py" -o \
+                        -name "conftest.py" -o \
+                        -name "*.test.ts" -o -name "*.test.tsx" -o \
+                        -name "*.test.js" -o -name "*.test.jsx" -o \
+                        -name "*.spec.ts" -o -name "*.spec.tsx" -o \
+                        -name "*.spec.js" -o -name "*.spec.jsx" -o \
+                        -name "*.fixture.*" -o -name "*.fixtures.*" \
+                      \) -print \
+                   \) >> /tmp/oracle-paths.txt
+              # Sanity: if the prune above did its job, no path in the list
+              # has another listed path as a parent-prefix. Bash-only check so
+              # we do not introduce single quotes inside the docker -c block.
+              prev=""
+              while IFS= read -r p; do
+                if [ -n "$prev" ] && [[ "$p" == "$prev/"* ]]; then
+                  echo "ERROR: oracle-paths overlap: $prev -> $p ; aborting hide"
+                  exit 12
+                fi
+                prev="$p"
+              done < <(sort /tmp/oracle-paths.txt)
               HIDDEN=0
               while IFS= read -r p; do
                 [ -z "$p" ] && continue

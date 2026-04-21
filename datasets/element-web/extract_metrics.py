@@ -1229,7 +1229,7 @@ def parse_patch(patch_path: str) -> dict:
                 print(f"[metrics] DEBUG:   - {item}")
         return metrics
 
-    with open(patch_path, "r") as f:
+    with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
 
     print(f"[metrics] DEBUG: Patch file found with {len(content)} bytes")
