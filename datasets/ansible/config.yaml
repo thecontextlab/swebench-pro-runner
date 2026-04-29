@@ -17,8 +17,8 @@ agent:
 
 # MCP server for A/B testing
 mcp:
-  url: # MCP server URL (configure your own)
-  description: "MCP server - indexed ansible codebase"
+  url: https://mcp.bito.ai/982268/mcp
+  description: "BitoAIArchitect MCP server - cross-repo codebase intelligence"
   # Token stored in GitHub Secrets: MCP_TOKEN_ANSIBLE
   token_secret_name: "MCP_TOKEN_ANSIBLE"
 
