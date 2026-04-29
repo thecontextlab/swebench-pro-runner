@@ -16,7 +16,7 @@ set -euo pipefail
 
 LIST="${LIST:-bito_phase5.txt}"
 MODEL="${MODEL:-claude-opus-4-6}"
-EFFORT="${EFFORT:-high}"
+EFFORT="${EFFORT:-xhigh}"
 LIMIT="${LIMIT:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 
