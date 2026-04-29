@@ -10,11 +10,17 @@ on:
         required: true
         type: choice
         options:
-          - openlibrary
+          - vuls
+          - flipt
           - teleport
+          - navidrome
+          - ansible
+          - element-web
+          - NodeBB
+          - openlibrary
+          - qutebrowser
           - tutanota
           - webclients
-          - vuls
       task:
         description: 'Task ID (full YAML filename without .yaml)'
         required: true
