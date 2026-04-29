@@ -332,10 +332,9 @@ jobs:
               echo "=== Step 4c: Upgrade Claude Code CLI ==="
               # Docker images ship with varying Claude CLI versions; some lack --effort.
               # Install the latest globally so every image uses the same newer CLI.
-              #
-              # Some base images ship a stale 'claude' shim at /usr/local/bin/claude
+              # Some base images ship a stale claude shim at /usr/local/bin/claude
               # that shadows the npm-global prefix, making the upgrade a no-op from
-              # PATH's perspective. Remove the shim before installing.
+              # PATH perspective. Remove the shim before installing.
               echo "Before upgrade: $(claude --version 2>&1 || echo MISSING)"
               rm -f /usr/local/bin/claude /usr/bin/claude
               hash -r
