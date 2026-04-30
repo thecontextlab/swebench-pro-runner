@@ -102,10 +102,6 @@ on:
         default: 0
         type: number
 
-concurrency:
-  group: swebench-eval-${{ github.actor }}-${{ inputs.repo }}
-  cancel-in-progress: false
-
 jobs:
   execute:
     runs-on: ubuntu-latest
