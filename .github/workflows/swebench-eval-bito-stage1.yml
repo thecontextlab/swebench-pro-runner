@@ -468,10 +468,13 @@ jobs:
               echo "Stage 1 OK — plan size: $(wc -c < /testbed/pipeline_artifacts/implementation-plan.md) bytes"
 
               # NOTE: this variant intentionally SKIPS Stages 2 and 3 (plan-to-agent-spec
-              # and agent-spec-executor). Per Anand's hypothesis test, we hand the Stage 1
+              # and agent-spec-executor). Per Anand hypothesis test, we hand the Stage 1
               # plan directly to a Claude executor with full vanilla tool set + BitoAIArchitect
-              # MCP. Goal: see whether the 3-stage scaffold's spec rigidity hurts
+              # MCP. Goal: see whether the 3-stage scaffold spec rigidity hurts
               # outcomes vs more-flexible direct execution.
+              # CAUTION: do NOT add apostrophes anywhere inside this -c block — they close
+              # the outer shell quote and the rest of the script runs on the host runner
+              # (causing /results and /run_executor.py to be undefined). See eval-pitfalls.
 
               echo ""
               echo "=== Executor: Claude direct execution from plan (tests still hidden) ==="
