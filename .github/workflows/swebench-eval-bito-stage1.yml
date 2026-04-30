@@ -1,0 +1,702 @@
+name: SWE-bench Bito Stage-1-only Evaluation
+
+run-name: "bito-stage1 | ${{ inputs.repo }} | ${{ inputs.task }} | ${{ inputs.model }} | effort:${{ inputs.effort }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repository'
+        required: true
+        type: choice
+        options:
+          - vuls
+          - flipt
+          - teleport
+          - navidrome
+          - ansible
+          - element-web
+          - NodeBB
+          - openlibrary
+          - qutebrowser
+          - tutanota
+          - webclients
+      task:
+        description: 'Task ID (full YAML filename without .yaml)'
+        required: true
+        type: string
+      model:
+        description: 'Claude model'
+        required: false
+        default: 'claude-opus-4-7'
+        type: choice
+        options:
+          - claude-opus-4-7
+          - claude-opus-4-6
+      effort:
+        description: 'Claude --effort level (session-scoped, passed to CLI)'
+        required: false
+        default: 'high'
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+      anthropic_api_key:
+        description: 'Anthropic API key (optional, falls back to ANTHROPIC_API_KEY secret)'
+        required: false
+        type: string
+      timeout_minutes:
+        description: 'Job timeout in minutes'
+        required: false
+        default: 120
+        type: number
+      agent_timeout_minutes:
+        description: 'Total 3-stage agent timeout in minutes'
+        required: false
+        default: 90
+        type: number
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) || 120 }}
+
+    steps:
+      - name: Checkout eval-runner
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Load task configuration
+        id: task
+        run: |
+          TASK_FILE="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.yaml"
+          if [ ! -f "$TASK_FILE" ]; then
+            echo "ERROR: Task file not found: $TASK_FILE"
+            ls datasets/${{ inputs.repo }}/tasks/ | head -10
+            exit 1
+          fi
+          echo "task_file=$TASK_FILE" >> $GITHUB_OUTPUT
+
+          REPO_URL=$(yq '.repo_url' "$TASK_FILE")
+          echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
+
+          yq '.swebench.before_repo_set_cmd' "$TASK_FILE" > /tmp/before_repo_set_cmd.txt
+          yq '.instruction' "$TASK_FILE" > /tmp/instruction.txt
+          yq '.swebench.fail_to_pass[]' "$TASK_FILE" > /tmp/fail_to_pass.txt
+
+          python3 -c "
+          import yaml
+          with open('$TASK_FILE') as f:
+              data = yaml.safe_load(f)
+          p2p = data.get('swebench', {}).get('pass_to_pass', []) or []
+          with open('/tmp/pass_to_pass.txt', 'w') as out:
+              for t in p2p:
+                  out.write(str(t) + '\n')
+          print(f'pass_to_pass: {len(p2p)} tests')
+          "
+
+          SETUP_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.setup.sh"
+          if [ -f "$SETUP_SCRIPT" ]; then
+            echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
+          else
+            echo "setup_script=" >> $GITHUB_OUTPUT
+          fi
+
+          RUN_SCRIPT="datasets/${{ inputs.repo }}/tasks/${{ inputs.task }}.run_script.sh"
+          if [ ! -f "$RUN_SCRIPT" ]; then
+            echo "ERROR: run_script.sh missing: $RUN_SCRIPT"
+            exit 1
+          fi
+          echo "run_script=$RUN_SCRIPT" >> $GITHUB_OUTPUT
+
+      - name: Resolve Docker image + MCP
+        id: config
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+          CONFIG_OUTPUT=$(python3 datasets/common/config_loader.py "${{ inputs.repo }}" "${{ inputs.task }}" "true")
+          echo "$CONFIG_OUTPUT" >> $GITHUB_OUTPUT
+
+          AR_IMAGE=$(echo "$CONFIG_OUTPUT" | grep "^ar_image=" | cut -d'=' -f2-)
+          MCP_URL=$(echo "$CONFIG_OUTPUT" | grep "^mcp_url=" | cut -d'=' -f2-)
+          echo "Image:   $AR_IMAGE"
+          echo "MCP URL: ${MCP_URL:-(empty — BitoAIArchitect requires a URL)}"
+          if [ -z "$MCP_URL" ]; then
+            echo "ERROR: MCP URL is empty. The Bito pipeline requires BitoAIArchitect MCP."
+            echo "Set mcp.url in datasets/${{ inputs.repo }}/config.yaml."
+            exit 1
+          fi
+
+      - name: Unzip Bito skills
+        run: |
+          if [ ! -f SKILLS.zip ]; then
+            echo "ERROR: SKILLS.zip missing at repo root"
+            exit 1
+          fi
+          rm -rf SKILLS
+          unzip -q SKILLS.zip
+          echo "Unzipped skills:"
+          ls SKILLS/
+          SKILL_COUNT=$(find SKILLS -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+          echo "Skill count: $SKILL_COUNT"
+          if [ "$SKILL_COUNT" -lt 12 ]; then
+            echo "ERROR: expected >=12 skill dirs, found $SKILL_COUNT"
+            exit 1
+          fi
+
+      - name: Setup unique results directory
+        id: results
+        run: |
+          UNIQUE_DIR="results-${{ github.run_id }}-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          UNIQUE_PATH="${{ github.workspace }}/${UNIQUE_DIR}"
+          echo "dir=${UNIQUE_DIR}" >> $GITHUB_OUTPUT
+          echo "path=${UNIQUE_PATH}" >> $GITHUB_OUTPUT
+          mkdir -p "${UNIQUE_PATH}"
+
+      - name: Docker login + pull image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker pull ${{ steps.config.outputs.ar_image }}
+
+      - name: Resolve API key
+        id: apikey
+        run: |
+          if [ -n "${{ inputs.anthropic_api_key }}" ]; then
+            echo "::add-mask::${{ inputs.anthropic_api_key }}"
+            echo "anthropic_key=${{ inputs.anthropic_api_key }}" >> $GITHUB_OUTPUT
+          else
+            echo "anthropic_key=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Bito skills visible inside container
+        run: |
+          EXPECTED_SKILLS=(
+            bito-scope-to-plan
+            bito-plan-to-agent-spec
+            bito-agent-spec-executor
+            bito-production-triage
+            bito-codebase-explorer
+            bito-spike
+            bito-epic-to-plan
+            bito-feature-plan
+            bito-commit-review
+            bito-feasibility
+            bito-trd
+            bito-prd
+          )
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ github.workspace }}/SKILLS:/root/.claude/skills:ro \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+              echo "=== Skills directory listing ==="
+              ls -la /root/.claude/skills/
+              echo ""
+              echo "=== Per-skill SKILL.md check ==="
+              MISSING=()
+              for s in '"${EXPECTED_SKILLS[*]}"'; do
+                if [ -f "/root/.claude/skills/$s/SKILL.md" ]; then
+                  echo "  OK  $s"
+                else
+                  echo "  MISS $s"
+                  MISSING+=("$s")
+                fi
+              done
+              if [ ${#MISSING[@]} -gt 0 ]; then
+                echo "ERROR: ${#MISSING[@]} skills missing: ${MISSING[*]}"
+                exit 1
+              fi
+              echo ""
+              echo "=== claude CLI present ==="
+              which claude || { echo "ERROR: claude CLI not in PATH"; exit 1; }
+              claude --version || true
+            '
+
+      - name: Run 3-stage Bito pipeline
+        id: run
+        timeout-minutes: ${{ fromJSON(inputs.agent_timeout_minutes) || 90 }}
+        run: |
+          cp /tmp/before_repo_set_cmd.txt ${{ github.workspace }}/before_repo_set_cmd.txt
+          cp /tmp/instruction.txt ${{ github.workspace }}/instruction.txt
+          cp /tmp/fail_to_pass.txt ${{ github.workspace }}/fail_to_pass.txt
+          cp /tmp/pass_to_pass.txt ${{ github.workspace }}/pass_to_pass.txt
+          cp "${{ steps.task.outputs.run_script }}" ${{ github.workspace }}/run_script.sh
+
+          SETUP_SCRIPT="${{ steps.task.outputs.setup_script }}"
+          if [ -n "$SETUP_SCRIPT" ] && [ -f "$SETUP_SCRIPT" ]; then
+            cp "$SETUP_SCRIPT" ${{ github.workspace }}/setup.sh
+          else
+            echo '#!/bin/bash' > ${{ github.workspace }}/setup.sh
+            echo 'echo "WARNING: no setup.sh"' >> ${{ github.workspace }}/setup.sh
+          fi
+
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v ${{ steps.results.outputs.path }}:/results \
+            -v ${{ github.workspace }}/SKILLS:/root/.claude/skills:ro \
+            -v ${{ github.workspace }}/BitoAIArchitectGuidelines.md:/opt/bito/CLAUDE.md:ro \
+            -v ${{ github.workspace }}/before_repo_set_cmd.txt:/before_repo_set_cmd.txt:ro \
+            -v ${{ github.workspace }}/instruction.txt:/instruction.txt:ro \
+            -v ${{ github.workspace }}/fail_to_pass.txt:/fail_to_pass.txt:ro \
+            -v ${{ github.workspace }}/pass_to_pass.txt:/pass_to_pass.txt:ro \
+            -v ${{ github.workspace }}/run_script.sh:/run_script.sh \
+            -v ${{ github.workspace }}/setup.sh:/setup.sh \
+            -v ${{ github.workspace }}/datasets/common/run_claude_stage1.py:/run_stage1.py:ro \
+            -v ${{ github.workspace }}/datasets/common/run_claude_executor.py:/run_executor.py:ro \
+            -e ANTHROPIC_API_KEY=${{ steps.apikey.outputs.anthropic_key }} \
+            -e MODEL=${{ inputs.model }} \
+            -e EFFORT=${{ inputs.effort }} \
+            -e TASK_ID="${{ inputs.task }}" \
+            -e REPO_URL="${{ steps.task.outputs.repo_url }}" \
+            -e MCP_URL="${{ steps.config.outputs.mcp_url }}" \
+            -e MCP_TOKEN="${{ secrets.MCP_TOKEN }}" \
+            -e CLAUDE_CODE_DISABLE_NONINTERACTIVE_HINT=1 \
+            ${{ steps.config.outputs.ar_image }} \
+            -c '
+              set -e
+
+              echo "=== Step 1: Clone repository ==="
+              if [ ! -d "/testbed/.git" ]; then
+                git clone "$REPO_URL" /testbed
+              fi
+              cd /testbed
+
+              echo ""
+              echo "=== Step 2: before_repo_set_cmd ==="
+              while IFS= read -r cmd || [ -n "$cmd" ]; do
+                if [ -n "$cmd" ]; then
+                  echo "Running: $cmd"
+                  eval "$cmd" || echo "Warning: command failed (may be expected)"
+                fi
+              done < /before_repo_set_cmd.txt
+
+              # Step 2b: make the fix commit unreachable so "git show <fix_sha>"
+              # returns "bad object" even if an agent reads /before_repo_set_cmd.txt
+              # and extracts the SHA. The mounted file itself stays read-only from
+              # the container side (GitHub Actions runners prevent root-in-container
+              # from writing through a bind-mount to a runner-owned file). That is
+              # fine — the fix lives in git objects; if we prune them, the SHA is a
+              # pointer to nothing.
+              echo ""
+              echo "=== Step 2b: Prune fix-commit objects ==="
+              cd /testbed
+              # Drop any named refs pointing at non-HEAD commits (the webclients
+              # Dockerfile creates refs/swebench/<sha> during image build).
+              git for-each-ref --format="%(refname)" "refs/swebench/*" 2>/dev/null | while read ref; do
+                git update-ref -d "$ref" 2>/dev/null || true
+              done
+              git reflog expire --expire=all --all 2>/dev/null || true
+              git gc --prune=now 2>/dev/null || true
+              echo "git objects pruned; fix commit should no longer resolve via git show"
+              # Stay in /testbed — subsequent steps (setup.sh, tests, stages) expect it.
+
+              echo ""
+              echo "=== Step 3: setup.sh ==="
+              chmod +x /setup.sh
+              source /setup.sh
+
+              echo ""
+              echo "=== Step 4: Pre-verify F2P (should fail) ==="
+              mapfile -t FAIL_TO_PASS < /fail_to_pass.txt
+              chmod +x /run_script.sh
+              set +e
+              VERIFICATION_PHASE=pre /run_script.sh "${FAIL_TO_PASS[@]}" > /results/pre_verification.log 2>&1
+              PRE_F2P_EXIT=$?
+              set -e
+              echo "F2P pre exit: $PRE_F2P_EXIT (nonzero expected)"
+
+              echo ""
+              echo "=== Step 4b: Pre-verify P2P (should pass) ==="
+              mapfile -t PASS_TO_PASS < /pass_to_pass.txt
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=pre /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_pre_verification.log 2>&1
+                P2P_PRE_EXIT=$?
+                set -e
+                echo "P2P pre exit: $P2P_PRE_EXIT"
+              else
+                echo "No pass_to_pass tests." > /results/p2p_pre_verification.log
+                P2P_PRE_EXIT=0
+              fi
+              echo "$P2P_PRE_EXIT" > /results/.p2p_pre_exit
+
+              echo ""
+              echo "=== Step 4c: Upgrade Claude Code CLI ==="
+              # Docker images ship with varying Claude CLI versions; some lack --effort.
+              # Install the latest globally so every image uses the same newer CLI.
+              # Some base images ship a stale claude shim at /usr/local/bin/claude
+              # that shadows the npm-global prefix, making the upgrade a no-op from
+              # PATH perspective. Remove the shim before installing.
+              echo "Before upgrade: $(claude --version 2>&1 || echo MISSING)"
+              rm -f /usr/local/bin/claude /usr/bin/claude
+              hash -r
+              npm install -g @anthropic-ai/claude-code@latest >/tmp/npm_claude_upgrade.log 2>&1 || {
+                echo "npm upgrade failed, tail of log:"; tail -30 /tmp/npm_claude_upgrade.log; exit 3;
+              }
+              hash -r
+              echo "After upgrade:  $(claude --version 2>&1 || echo MISSING)"
+              echo "Resolved binary: $(command -v claude || echo MISSING)"
+
+              echo ""
+              echo "=== Step 5: Install CLAUDE.md in /testbed ==="
+              cp /opt/bito/CLAUDE.md /testbed/CLAUDE.md
+              echo "Wrote /testbed/CLAUDE.md ($(wc -c < /testbed/CLAUDE.md) bytes)"
+
+              # Audit capture: copy key inputs to /results so they survive in the
+              # uploaded artifact. Reviewers can diff these against the source files
+              # in the repo to confirm the pipeline ran with the intended content.
+              mkdir -p /results/audit
+              cp /testbed/CLAUDE.md /results/audit/CLAUDE.md
+              cp /instruction.txt /results/audit/instruction.txt
+              echo "=== CLAUDE.md head (proof of Bito guidelines) ==="
+              head -20 /testbed/CLAUDE.md
+              echo "=== BitoAIArchitect mentions in CLAUDE.md ==="
+              grep -n -i "bitoaiarchitect\|bito architect\|call first" /testbed/CLAUDE.md | head -5
+
+              mkdir -p /testbed/pipeline_artifacts
+
+              echo ""
+              echo "=== Step 5b: Hide test files from planning (defeat test-oracle shortcut) ==="
+              # Many SWE-bench tasks bundle the failing test as part of the task
+              # setup (before_repo_set_cmd git-checks-out a test that contains
+              # the exact expected output). Agents that read the test first
+              # can reverse-engineer the fix verbatim and skip the Bito
+              # planning/MCP work entirely. We move test files to a shadow
+              # location for stages 1+2, then restore them before stage 3.
+              mkdir -p /tmp/oracle-shadow
+              cd /testbed
+              : > /tmp/oracle-paths.txt
+              # Single pass: match test/fixture directories AND prune them, so
+              # any test files inside those directories are NOT collected
+              # separately. If we collected both a parent dir and files inside
+              # it, the file-move would create the target dir, and the later
+              # dir-move would nest (mv src existing-dir => dst/basename), which
+              # broke 178 files in the ol#2 run.
+              # NOTE: -name test (singular) added for NodeBB + element-web layout.
+              # Hyphenated -test.{ts,tsx,js,jsx} added for element-web naming.
+              # Audit 2026-04-30 confirmed both leaks; see test-oracle-hide-leaks.md.
+              find . -path "./.git" -prune \
+                -o \( -type d \( \
+                        -name tests -o -name test -o \
+                        -name __tests__ -o -name __test__ -o \
+                        -name fixtures -o -name __mocks__ -o \
+                        -name __snapshots__ -o -name testdata \
+                      \) -prune -print \
+                   \) \
+                -o \( -type f \( \
+                        -name "*_test.go" -o \
+                        -name "test_*.py" -o -name "*_test.py" -o \
+                        -name "conftest.py" -o \
+                        -name "*.test.ts" -o -name "*.test.tsx" -o \
+                        -name "*.test.js" -o -name "*.test.jsx" -o \
+                        -name "*-test.ts" -o -name "*-test.tsx" -o \
+                        -name "*-test.js" -o -name "*-test.jsx" -o \
+                        -name "*.spec.ts" -o -name "*.spec.tsx" -o \
+                        -name "*.spec.js" -o -name "*.spec.jsx" -o \
+                        -name "*-spec.ts" -o -name "*-spec.tsx" -o \
+                        -name "*-spec.js" -o -name "*-spec.jsx" -o \
+                        -name "*.fixture.*" -o -name "*.fixtures.*" \
+                      \) -print \
+                   \) >> /tmp/oracle-paths.txt
+              # Sanity: if the prune above did its job, no path in the list
+              # has another listed path as a parent-prefix. Bash-only check so
+              # we do not introduce single quotes inside the docker -c block.
+              prev=""
+              while IFS= read -r p; do
+                if [ -n "$prev" ] && [[ "$p" == "$prev/"* ]]; then
+                  echo "ERROR: oracle-paths overlap: $prev -> $p ; aborting hide"
+                  exit 12
+                fi
+                prev="$p"
+              done < <(sort /tmp/oracle-paths.txt)
+              HIDDEN=0
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                src="/testbed/$p"
+                dst="/tmp/oracle-shadow/$p"
+                if [ -e "$src" ]; then
+                  mkdir -p "$(dirname "$dst")"
+                  mv "$src" "$dst"
+                  HIDDEN=$((HIDDEN+1))
+                fi
+              done < /tmp/oracle-paths.txt
+              # Also remove from the git index so "git show :<path>" and
+              # "git diff --cached -- <path>" cannot be used to reach the
+              # test content through git history.
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                git -C /testbed rm --cached -f --quiet -- "$p" 2>/dev/null || true
+              done < /tmp/oracle-paths.txt
+              # Close the last oracle channel: "git show HEAD:<path>". Record
+              # the original HEAD so we can restore it before post-verify, then
+              # commit the index removal. HEAD then points at a tree with no
+              # test files, so the agent cannot extract test content through
+              # the HEAD reference either.
+              git -C /testbed rev-parse HEAD > /tmp/oracle-orig-head.txt
+              git -C /testbed \
+                  -c user.email=oracle-hide@local \
+                  -c user.name=oracle-hide \
+                  commit --no-verify --quiet --allow-empty \
+                  -m "[internal] hide test files during planning stages" 2>/dev/null || true
+              # Expire reflog so the original HEAD is not trivially discoverable
+              # via "git reflog" or "git log --walk-reflogs".
+              git -C /testbed reflog expire --expire=all --all 2>/dev/null || true
+              echo "Hid $HIDDEN test paths from /testbed (working tree + index + HEAD tree) for stages 1-2"
+              # Audit evidence: what we hid so reviewers can verify this ran.
+              cp /tmp/oracle-paths.txt /results/audit/oracle_hidden_paths.txt 2>/dev/null || true
+
+              echo ""
+              echo "=== Stage 1: scope-to-plan ==="
+              set +e
+              python3 /run_stage1.py 2>&1 | tee /results/stage1.log
+              STAGE1_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Stage 1 exit: $STAGE1_EXIT"
+              if [ ! -s /testbed/pipeline_artifacts/implementation-plan.md ]; then
+                echo "ERROR: Stage 1 did not produce implementation-plan.md"
+                exit 10
+              fi
+              echo "Stage 1 OK — plan size: $(wc -c < /testbed/pipeline_artifacts/implementation-plan.md) bytes"
+
+              # NOTE: this variant intentionally SKIPS Stages 2 and 3 (plan-to-agent-spec
+              # and agent-spec-executor). Per Anand's hypothesis test, we hand the Stage 1
+              # plan directly to a Claude executor with full vanilla tool set + BitoAIArchitect
+              # MCP. Goal: see whether the 3-stage scaffold's spec rigidity hurts
+              # outcomes vs more-flexible direct execution.
+
+              echo ""
+              echo "=== Executor: Claude direct execution from plan (tests still hidden) ==="
+              set +e
+              python3 /run_executor.py 2>&1 | tee /results/executor.log
+              STAGE3_EXIT=${PIPESTATUS[0]}
+              set -e
+              echo "Executor exit: $STAGE3_EXIT"
+              # Variables Stage 2 would have set — kept here for downstream-print compat.
+              STAGE2_EXIT=0
+
+              echo ""
+              echo "=== Step 5.7b: Restore test files (post Stage 3, pre-verify) ==="
+              # Tests were kept hidden through Stage 3 so the executor cannot
+              # oracle-shortcut the fix (was observed reading cpe_test.go on its
+              # first 4 tool calls in the pre-hardening trace). Restore them now
+              # so git diff, post-verify F2P and post-verify P2P can all see
+              # the real test files.
+
+              # Move HEAD back to the pre-hide commit so "git diff HEAD" and
+              # the post-verify steps see the intended tree. --soft keeps the
+              # working tree and index as they are (preserving stage-3 edits).
+              ORIG_HEAD=$(cat /tmp/oracle-orig-head.txt 2>/dev/null)
+              if [ -n "$ORIG_HEAD" ]; then
+                git -C /testbed reset --soft "$ORIG_HEAD" --quiet 2>/dev/null || true
+                echo "HEAD reset to original: $ORIG_HEAD"
+              fi
+
+              RESTORED=0
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                src="/tmp/oracle-shadow/$p"
+                dst="/testbed/$p"
+                if [ -e "$src" ]; then
+                  mkdir -p "$(dirname "$dst")"
+                  mv "$src" "$dst"
+                  RESTORED=$((RESTORED+1))
+                fi
+              done < /tmp/oracle-paths.txt
+              # Re-stage restored paths into the git index so post-verify
+              # and "git diff > changes.patch" see the intended repo state.
+              while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                p="${p#./}"
+                [ -e "/testbed/$p" ] && git -C /testbed add --force --quiet -- "$p" 2>/dev/null || true
+              done < /tmp/oracle-paths.txt
+              echo "Restored $RESTORED test paths (working tree + git index)"
+
+              echo ""
+              echo "=== Creating patch file ==="
+              cd /testbed
+              git status --short
+              git diff > /results/changes.patch
+              PATCH_SIZE=$(stat -c%s /results/changes.patch)
+              echo "Patch size: $PATCH_SIZE bytes"
+
+              echo ""
+              echo "=== Copy pipeline artifacts to /results ==="
+              cp -r /testbed/pipeline_artifacts /results/pipeline_artifacts
+              ls -la /results/pipeline_artifacts/
+
+              echo ""
+              echo "=== Post-verify F2P ==="
+              set +e
+              VERIFICATION_PHASE=post /run_script.sh "${FAIL_TO_PASS[@]}" > /results/verification.log 2>&1
+              VERIFY_EXIT=$?
+              set -e
+              echo "F2P post exit: $VERIFY_EXIT"
+              cat /results/verification.log
+
+              echo ""
+              echo "=== Post-verify P2P ==="
+              if [ ${#PASS_TO_PASS[@]} -gt 0 ]; then
+                set +e
+                VERIFICATION_PHASE=post /run_script.sh "${PASS_TO_PASS[@]}" > /results/p2p_verification.log 2>&1
+                P2P_POST_EXIT=$?
+                set -e
+                echo "P2P post exit: $P2P_POST_EXIT"
+              else
+                echo "No pass_to_pass tests." > /results/p2p_verification.log
+                P2P_POST_EXIT=0
+              fi
+              echo "$P2P_POST_EXIT" > /results/.p2p_post_exit
+
+              if [ $VERIFY_EXIT -eq 0 ]; then
+                STATUS="success"
+              else
+                STATUS="failed"
+              fi
+              echo "Pipeline status: $STATUS (stage1=$STAGE1_EXIT stage2=$STAGE2_EXIT stage3=$STAGE3_EXIT verify=$VERIFY_EXIT)"
+
+              # Concat stage logs into agent.log so extract_metrics.py (which expects a
+              # single JSONL trajectory, matching the original non-Bito pipeline) can
+              # produce the full 25-key result.json schema the ETL consumes.
+              # Variant: stage1 + executor (no stage2/stage3 in this workflow).
+              cat /results/stage1.log /results/executor.log > /results/agent.log 2>/dev/null || true
+
+              echo "$STAGE3_EXIT" > /results/.agent_exit
+              echo "$VERIFY_EXIT" > /results/.verify_exit
+              ls -la /results/
+              exit $VERIFY_EXIT
+            '
+        continue-on-error: true
+
+      - name: Extract enhanced metrics
+        if: always()
+        env:
+          TASK_ID: ${{ inputs.task }}
+          MODEL: ${{ inputs.model }}
+          REPO_NAME: ${{ inputs.repo }}
+          FAIL_TO_PASS_FILE: ${{ github.workspace }}/fail_to_pass.txt
+          PASS_TO_PASS_FILE: ${{ github.workspace }}/pass_to_pass.txt
+          MCP_CONFIG: "1"
+        run: |
+          cd ${{ github.workspace }}
+          AGENT_EXIT=$(cat ${{ steps.results.outputs.path }}/.agent_exit 2>/dev/null || echo "1")
+          VERIFY_EXIT=$(cat ${{ steps.results.outputs.path }}/.verify_exit 2>/dev/null || echo "1")
+
+          if [ ! -f "datasets/${{ inputs.repo }}/extract_metrics.py" ]; then
+            echo "ERROR: datasets/${{ inputs.repo }}/extract_metrics.py missing — cannot produce ETL-compatible result.json"
+            exit 1
+          fi
+
+          # Produce the full 25-key result.json matching the original SWE-bench-Pro
+          # schema. Consumes /results/agent.log (concatenated from the three stage
+          # logs inside the container) plus changes.patch + verification logs.
+          RESULTS_DIR="${{ steps.results.outputs.path }}" \
+          AGENT_EXIT_CODE="$AGENT_EXIT" \
+          VERIFY_EXIT_CODE="$VERIFY_EXIT" \
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          python3 datasets/${{ inputs.repo }}/extract_metrics.py
+
+      - name: Generate summary
+        if: always()
+        run: |
+          RESULT_FILE="${{ steps.results.outputs.path }}/result.json"
+          echo "# Bito 3-Stage Evaluation Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$RESULT_FILE" ]; then
+            STATUS=$(jq -r '.status // "unknown"' "$RESULT_FILE")
+            RESOLVED=$(jq -r '.resolved // false' "$RESULT_FILE")
+            F2P_PASS=$(jq -r '.tests.passed // 0' "$RESULT_FILE")
+            F2P_TOTAL=$(jq -r '.tests.total // 0' "$RESULT_FILE")
+            P2P_PASS=$(jq -r '.p2p_tests.passed // 0' "$RESULT_FILE")
+            P2P_TOTAL=$(jq -r '.p2p_tests.total // 0' "$RESULT_FILE")
+            COST=$(jq -r '.total_cost_usd // 0' "$RESULT_FILE")
+            DURATION=$(jq -r '.duration_seconds // 0' "$RESULT_FILE")
+            TOOL_CALLS=$(jq -r '.tool_usage.total_tool_calls // 0' "$RESULT_FILE")
+            MCP_CALLS=$(jq -r '.tool_usage.mcp_tools.total_calls // 0' "$RESULT_FILE")
+
+            if [ "$RESOLVED" = "true" ]; then
+              echo "## Result: **RESOLVED** :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## Result: **UNRESOLVED** :x:" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Task | \`${{ inputs.task }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Repo | ${{ inputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Model | ${{ inputs.model }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Effort | ${{ inputs.effort }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| F2P tests | $F2P_PASS / $F2P_TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| P2P tests | $P2P_PASS / $P2P_TOTAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| Tool calls (total / MCP) | $TOOL_CALLS / $MCP_CALLS |" >> $GITHUB_STEP_SUMMARY
+            echo "| Duration (s) | $DURATION |" >> $GITHUB_STEP_SUMMARY
+            echo "| Cost (USD) | $COST |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Result: **error** (no result file)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Scrub API keys from artifacts
+        if: always()
+        run: |
+          RESULTS_DIR="${{ steps.results.outputs.path }}"
+          if [ -d "$RESULTS_DIR" ]; then
+            for LOG_FILE in "$RESULTS_DIR"/agent.log "$RESULTS_DIR"/*.log; do
+              [ -f "$LOG_FILE" ] || continue
+              sed -i 's/sk-ant-[A-Za-z0-9_-]\{20,\}/[REDACTED_ANTHROPIC_KEY]/g' "$LOG_FILE"
+              sed -i 's/ANTHROPIC_API_KEY=[^ ]*/ANTHROPIC_API_KEY=[REDACTED]/g' "$LOG_FILE"
+              # MCP bearer tokens
+              sed -i 's/Bearer [A-Za-z0-9_-]\{8,\}/Bearer [REDACTED]/g' "$LOG_FILE"
+              sed -i 's/MCP_TOKEN=[^ ]*/MCP_TOKEN=[REDACTED]/g' "$LOG_FILE"
+            done
+          fi
+
+      - name: Split artifacts (ETL-compatible + Bito debug)
+        id: split
+        if: always()
+        run: |
+          RESULTS="${{ steps.results.outputs.path }}"
+          DEBUG_DIR="${RESULTS}-debug"
+          mkdir -p "$DEBUG_DIR"
+          # Docker writes /results contents as root; the runner user needs write
+          # permission to rearrange them, so chown the whole tree to the runner.
+          sudo chown -R "$USER:$USER" "$RESULTS" "$DEBUG_DIR"
+          # Move Bito-specific extras out of the ETL-bound dir so its file set
+          # matches the original SWE-bench-Pro artifact schema exactly.
+          for extra in audit pipeline_artifacts stage1.log executor.log; do
+            if [ -e "$RESULTS/$extra" ]; then
+              mv "$RESULTS/$extra" "$DEBUG_DIR/"
+            fi
+          done
+          echo "debug_path=$DEBUG_DIR" >> $GITHUB_OUTPUT
+          echo "=== ETL artifact contents ==="
+          ls -la "$RESULTS"
+          echo "=== Debug artifact contents ==="
+          ls -la "$DEBUG_DIR"
+
+      - name: Upload ETL artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-bito-stage1-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.results.outputs.path }}/
+          retention-days: 90
+
+      - name: Upload Bito debug artifact
+        # Only upload if split succeeded and produced a debug_path; otherwise
+        # a default empty path causes upload-artifact to scan / which fails.
+        if: always() && steps.split.outputs.debug_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: swebench-bito-stage1-debug-${{ inputs.task }}-${{ github.run_id }}-${{ github.run_number }}
+          path: ${{ steps.split.outputs.debug_path }}/
+          retention-days: 90
