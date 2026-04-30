@@ -86,14 +86,14 @@ fi
 F2P_TESTS="$(python3 -c "
 import re, json, sys
 text = open('$INSTANCE_INFO').read()
-m = re.search(r'^FAIL_TO_PASS:\s*(\[.*?\])', text, re.M | re.S)
+m = re.search(r'^FAIL_TO_PASS:\s*(\[.*\])\s*$', text, re.M)
 arr = json.loads(m.group(1)) if m else []
 print('\n'.join(arr))
 ")"
 P2P_TESTS="$(python3 -c "
 import re, json
 text = open('$INSTANCE_INFO').read()
-m = re.search(r'^PASS_TO_PASS:\s*(\[.*?\])', text, re.M | re.S)
+m = re.search(r'^PASS_TO_PASS:\s*(\[.*\])\s*$', text, re.M)
 arr = json.loads(m.group(1)) if m else []
 print('\n'.join(arr))
 ")"
@@ -152,6 +152,15 @@ docker run --rm --platform "$PLATFORM" \
     echo "=== Step 1: Install latest Claude Code CLI ==="
     rm -f /usr/local/bin/claude /usr/bin/claude 2>/dev/null || true
     hash -r
+    if ! command -v npm >/dev/null 2>&1; then
+      echo "  npm not found in image; installing Node.js 20 via NodeSource"
+      (apt-get update -qq && \
+       apt-get install -y -qq curl ca-certificates gnupg && \
+       curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+       apt-get install -y -qq nodejs) >/tmp/node-install.log 2>&1 || {
+        echo "node install failed; tail of log:"; tail -30 /tmp/node-install.log; exit 3;
+      }
+    fi
     npm install -g @anthropic-ai/claude-code@latest >/tmp/npm.log 2>&1 || {
       echo "npm install failed; tail of log:"; tail -30 /tmp/npm.log; exit 3;
     }
@@ -170,10 +179,9 @@ docker run --rm --platform "$PLATFORM" \
 
     echo ""
     echo "=== Step 3: Pre-verify F2P (should FAIL) ==="
-    chmod +x /run_script.sh
     mapfile -t F2P_TESTS < /fail_to_pass.txt
     set +e
-    /run_script.sh "${F2P_TESTS[@]}" > /results/pre_verification.log 2>&1
+    bash /run_script.sh "${F2P_TESTS[@]}" > /results/pre_verification.log 2>&1
     PRE_F2P_EXIT=$?
     set -e
     echo "  pre-F2P exit: $PRE_F2P_EXIT (expected non-zero)"
@@ -183,7 +191,7 @@ docker run --rm --platform "$PLATFORM" \
     mapfile -t P2P_TESTS < /pass_to_pass.txt
     if [ "${#P2P_TESTS[@]}" -gt 0 ]; then
       set +e
-      /run_script.sh "${P2P_TESTS[@]}" > /results/p2p_pre_verification.log 2>&1
+      bash /run_script.sh "${P2P_TESTS[@]}" > /results/p2p_pre_verification.log 2>&1
       PRE_P2P_EXIT=$?
       set -e
       echo "  pre-P2P exit: $PRE_P2P_EXIT"
@@ -210,7 +218,7 @@ docker run --rm --platform "$PLATFORM" \
     echo ""
     echo "=== Step 7: Post-verify F2P ==="
     set +e
-    /run_script.sh "${F2P_TESTS[@]}" > /results/verification.log 2>&1
+    bash /run_script.sh "${F2P_TESTS[@]}" > /results/verification.log 2>&1
     POST_F2P_EXIT=$?
     set -e
     echo "  post-F2P exit: $POST_F2P_EXIT (0 = resolved)"
@@ -219,7 +227,7 @@ docker run --rm --platform "$PLATFORM" \
     echo "=== Step 8: Post-verify P2P ==="
     if [ "${#P2P_TESTS[@]}" -gt 0 ]; then
       set +e
-      /run_script.sh "${P2P_TESTS[@]}" > /results/p2p_verification.log 2>&1
+      bash /run_script.sh "${P2P_TESTS[@]}" > /results/p2p_verification.log 2>&1
       POST_P2P_EXIT=$?
       set -e
       echo "  post-P2P exit: $POST_P2P_EXIT (0 = no regression)"

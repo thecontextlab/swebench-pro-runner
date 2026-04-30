@@ -485,9 +485,13 @@ jobs:
               mkdir -p /tmp/oracle-shadow
               cd /testbed
               : > /tmp/oracle-paths.txt
+              # NOTE: -name test (singular) added for NodeBB + element-web layout.
+              # Hyphenated -test.{ts,tsx,js,jsx} added for element-web naming.
+              # Audit 2026-04-30 confirmed both leaks; see test-oracle-hide-leaks.md.
               find . -path "./.git" -prune \
                 -o \( -type d \( \
-                        -name tests -o -name __tests__ -o -name __test__ -o \
+                        -name tests -o -name test -o \
+                        -name __tests__ -o -name __test__ -o \
                         -name fixtures -o -name __mocks__ -o \
                         -name __snapshots__ -o -name testdata \
                       \) -prune -print \
@@ -498,8 +502,12 @@ jobs:
                         -name "conftest.py" -o \
                         -name "*.test.ts" -o -name "*.test.tsx" -o \
                         -name "*.test.js" -o -name "*.test.jsx" -o \
+                        -name "*-test.ts" -o -name "*-test.tsx" -o \
+                        -name "*-test.js" -o -name "*-test.jsx" -o \
                         -name "*.spec.ts" -o -name "*.spec.tsx" -o \
                         -name "*.spec.js" -o -name "*.spec.jsx" -o \
+                        -name "*-spec.ts" -o -name "*-spec.tsx" -o \
+                        -name "*-spec.js" -o -name "*-spec.jsx" -o \
                         -name "*.fixture.*" -o -name "*.fixtures.*" \
                       \) -print \
                    \) >> /tmp/oracle-paths.txt

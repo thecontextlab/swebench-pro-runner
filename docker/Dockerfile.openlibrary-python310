@@ -1,0 +1,107 @@
+# SWE-bench Pro Runner — Docker image for openlibrary (Python 3.10)
+# Required by 3 tasks routed via task_groups.python310_legacy in config.yaml
+# whose upstream SWE-bench_Pro-os Dockerfiles pin python:3.10-slim-bookworm:
+#   - 03095f26..., 5069b09e..., e390c121... (all share -v8717e18970... patch suffix)
+#
+# Built FROM official python:3.10-slim-bookworm (no prebaked base in our registry).
+FROM python:3.10-slim-bookworm
+
+# System dependencies — mirrors upstream openlibrary base_dockerfile install set
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    bash \
+    curl \
+    wget \
+    gnupg \
+    ca-certificates \
+    build-essential \
+    libpq-dev \
+    libxml2-dev \
+    libxslt-dev \
+    libffi-dev \
+    zlib1g-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libfreetype6-dev \
+    liblcms2-dev \
+    libopenjp2-7-dev \
+    libtiff5-dev \
+    tk-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libxcb1-dev \
+    parallel \
+    zip \
+    unzip \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20 — required by openlibrary npm-based asset build (make js, etc.)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version && npm --version
+
+# Multi-agent CLI tools (parity with python311 image)
+RUN npm install -g @anthropic-ai/claude-code@2.1.42 && \
+    claude --version || echo "Claude CLI installed"
+
+RUN npm install -g @openai/codex@0.101.0 && \
+    codex --version || echo "Codex CLI installed"
+
+RUN npm install -g @google/gemini-cli@0.28.2 && \
+    gemini --version || echo "Gemini CLI installed"
+
+RUN curl https://cursor.com/install -fsS | bash && \
+    ln -sf ~/.local/bin/agent /usr/local/bin/cursor-agent && \
+    cursor-agent --version || echo "Cursor CLI installed"
+
+# Verify CLI tools
+RUN echo "=== Verifying CLI tools ===" && \
+    which claude && echo "✓ Claude CLI" && \
+    which codex && echo "✓ Codex CLI" && \
+    which gemini && echo "✓ Gemini CLI" && \
+    which cursor-agent && echo "✓ Cursor CLI"
+
+# Python deps — same set as python311 image; pytest unpinned per audit finding
+# (pytest==6.2.1 pin was an internal heuristic; original SWE-bench_Pro-os never pins it)
+RUN pip3 install --no-cache-dir \
+    requests \
+    google-cloud-storage \
+    pyyaml \
+    pytest \
+    pytest-cov \
+    pytest-mock \
+    pytest-rerunfailures \
+    web.py \
+    psycopg2-binary \
+    babel \
+    beautifulsoup4 \
+    internetarchive \
+    isbnlib \
+    lxml \
+    mypy \
+    pillow \
+    pymarc \
+    python-memcached \
+    simplejson \
+    supervisor \
+    pytz \
+    python-dateutil \
+    jsonschema \
+    elasticsearch \
+    redis \
+    msgpack \
+    olefile \
+    rdflib \
+    pyopenssl \
+    iso-639 \
+    markdown \
+    httpx \
+    evdev && \
+    python3 -c "import pytest; print('pytest installed')" && \
+    pytest --version
+
+WORKDIR /testbed
+
+RUN echo "=== Image ready: openlibrary python:3.10-slim-bookworm + multi-agent CLIs ==="
