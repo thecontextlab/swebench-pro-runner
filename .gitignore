@@ -37,3 +37,10 @@ artifacts/
 # Temporary files
 *.tmp
 *.bak
+
+# Local Claude Code config / agent state
+.claude/
+
+# Local dispatch logs and ad-hoc reports
+bito_*.txt
+reports/
