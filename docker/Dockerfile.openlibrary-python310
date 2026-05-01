@@ -63,44 +63,19 @@ RUN echo "=== Verifying CLI tools ===" && \
     which gemini && echo "✓ Gemini CLI" && \
     which cursor-agent && echo "✓ Cursor CLI"
 
-# Python deps — same set as python311 image; pytest unpinned per audit finding
-# (pytest==6.2.1 pin was an internal heuristic; original SWE-bench_Pro-os never pins it)
+# Minimal baked Python deps — only what's needed for the runner harness itself.
+# Test deps (pytest, plugins, repo runtime libs) come from per-task setup.sh via
+# pypi-timemachine, so the versions match the task's expected era. Baking pytest
+# here causes plugin-API conflicts when setup.sh later reinstalls an older
+# pytest from requirements_test.txt (e.g. pytest-cov 7.x using `wrapper=True`
+# kwarg that older pluggy doesn't accept). Audit 2026-04-30: this was the
+# blocker on first attempt of the python310 image.
 RUN pip3 install --no-cache-dir \
     requests \
-    google-cloud-storage \
     pyyaml \
-    pytest \
-    pytest-cov \
-    pytest-mock \
-    pytest-rerunfailures \
-    web.py \
-    psycopg2-binary \
-    babel \
-    beautifulsoup4 \
-    internetarchive \
-    isbnlib \
-    lxml \
-    mypy \
-    pillow \
-    pymarc \
-    python-memcached \
-    simplejson \
-    supervisor \
-    pytz \
-    python-dateutil \
-    jsonschema \
-    elasticsearch \
-    redis \
-    msgpack \
-    olefile \
-    rdflib \
-    pyopenssl \
-    iso-639 \
-    markdown \
-    httpx \
     evdev && \
-    python3 -c "import pytest; print('pytest installed')" && \
-    pytest --version
+    python3 --version && \
+    echo "Image ready; setup.sh installs test deps via pypi-timemachine"
 
 WORKDIR /testbed
 
